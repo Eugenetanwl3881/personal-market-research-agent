@@ -1,10 +1,10 @@
-# Personal Market Research Agent
+# Market Research Assistant
 
-A conversational financial-market research assistant built with LangChain and LangGraph.
+A conversational financial-market research assistant built with LangChain and LangGraph, designed as a focused foundation for future expansion.
 
 ## First version
 
-The assistant will eventually accept a natural-language stock question, retrieve market data, search recent news, perform deterministic calculations, and return a sourced informational answer.
+The first version accepts a natural-language stock question, retrieves market data, searches recent news, performs deterministic calculations, and returns a sourced informational answer.
 
 Example query:
 
