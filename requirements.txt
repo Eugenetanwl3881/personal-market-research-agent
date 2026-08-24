@@ -1,0 +1,7 @@
+langgraph
+langchain-core
+langchain-openai
+yfinance
+tavily-python
+python-dotenv
+pytest
