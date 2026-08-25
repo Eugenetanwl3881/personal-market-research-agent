@@ -1,5 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
+from .answer import write_market_answer
 from .calculations import calculate_share_cost
 from .data import get_stock_quote, search_market_news
 from .guardrails import check_scope
@@ -127,7 +128,7 @@ def calculate_cost(state: MarketResearchState) -> dict:
 def write_answer(state: MarketResearchState) -> dict:
     return {
         **_complete(state, "write_answer"),
-        "final_answer": "Graph skeleton completed; data and model steps are not connected yet.",
+        "final_answer": write_market_answer(state),
     }
 
 
