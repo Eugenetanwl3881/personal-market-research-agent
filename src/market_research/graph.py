@@ -1,6 +1,8 @@
 from langgraph.graph import END, START, StateGraph
 
+from .data import get_stock_quote
 from .guardrails import check_scope
+from .parser import parse_market_request
 from .state import MarketResearchState
 
 
@@ -36,11 +38,34 @@ def route_after_scope_check(state: MarketResearchState) -> str:
 
 
 def parse_request(state: MarketResearchState) -> dict:
-    return _complete(state, "parse_request")
+    parsed = parse_market_request(state["question"])
+
+    return {
+        **_complete(state, "parse_request"),
+        "ticker": parsed["ticker"],
+        "shares": parsed["shares"],
+    }
 
 
 def fetch_quote(state: MarketResearchState) -> dict:
-    return _complete(state, "fetch_quote")
+    quotes = {}
+    errors = list(state.get("errors", []))
+
+    for ticker in state.get("ticker", []):
+        try:
+            quotes[ticker] = get_stock_quote(ticker)
+        except (ValueError, RuntimeError) as exc:
+            errors.append(f"Could not retrieve quote for {ticker}: {exc}")
+
+    update = {
+        **_complete(state, "fetch_quote"),
+        "quote": quotes,
+    }
+
+    if errors:
+        update["errors"] = errors
+
+    return update
 
 
 def fetch_news(state: MarketResearchState) -> dict:

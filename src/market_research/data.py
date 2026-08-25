@@ -16,7 +16,10 @@ def get_stock_quote(ticker: str) -> dict:
         raise ValueError("Ticker must not be empty.")
 
     stock = yf.Ticker(symbol)
-    history = stock.history(period="5d")
+    try:
+        history = stock.history(period="5d")
+    except Exception as exc:
+        raise RuntimeError(f"Unable to retrieve quote data for {symbol}.") from exc
 
     if history.empty or "Close" not in history:
         raise ValueError(f"No quote data found for ticker: {symbol}")
