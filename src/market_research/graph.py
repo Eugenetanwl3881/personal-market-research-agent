@@ -1,5 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
+from .calculations import calculate_share_cost
 from .data import get_stock_quote, search_market_news
 from .guardrails import check_scope
 from .parser import parse_market_request
@@ -91,7 +92,36 @@ def fetch_news(state: MarketResearchState) -> dict:
 
 
 def calculate_cost(state: MarketResearchState) -> dict:
-    return _complete(state, "calculate_cost")
+    shares = state.get("shares")
+    quotes = state.get("quote", {})
+
+    if shares is None:
+        return {
+            **_complete(state, "calculate_cost"),
+            "calculation": "No share quantity was provided.",
+        }
+
+    calculations = []
+    errors = list(state.get("errors", []))
+
+    for ticker, quote in quotes.items():
+        try:
+            total = calculate_share_cost(quote["price"], shares)
+            calculations.append(
+                f"{ticker}: {shares} shares × ${quote['price']:.2f} = ${total:.2f}"
+            )
+        except (KeyError, ValueError) as exc:
+            errors.append(f"Could not calculate cost for {ticker}: {exc}")
+
+    update = {
+        **_complete(state, "calculate_cost"),
+        "calculation": "\n".join(calculations) or "No calculations available.",
+    }
+
+    if errors:
+        update["errors"] = errors
+
+    return update
 
 
 def write_answer(state: MarketResearchState) -> dict:
