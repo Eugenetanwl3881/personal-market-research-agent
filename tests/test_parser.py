@@ -19,3 +19,9 @@ def test_parses_multiple_tickers():
     result = parse_market_request("Compare AAPL and MSFT prices.")
 
     assert result["ticker"] == ["AAPL", "MSFT"]
+
+
+def test_does_not_treat_about_as_a_ticker():
+    result = parse_market_request("What is the latest news about AAPL?")
+
+    assert result["ticker"] == ["AAPL"]

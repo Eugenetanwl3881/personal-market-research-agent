@@ -1,6 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
-from .data import get_stock_quote
+from .data import get_stock_quote, search_market_news
 from .guardrails import check_scope
 from .parser import parse_market_request
 from .state import MarketResearchState
@@ -69,7 +69,25 @@ def fetch_quote(state: MarketResearchState) -> dict:
 
 
 def fetch_news(state: MarketResearchState) -> dict:
-    return _complete(state, "fetch_news")
+    tickers = state.get("ticker", [])
+    query = " ".join(tickers) + " latest market news"
+
+    try:
+        news = search_market_news(query)
+        return {
+            **_complete(state, "fetch_news"),
+            "news": news,
+        }
+    except (ValueError, RuntimeError) as exc:
+        errors = [
+            *state.get("errors", []),
+            f"Could not retrieve market news: {exc}",
+        ]
+        return {
+            **_complete(state, "fetch_news"),
+            "news": [],
+            "errors": errors,
+        }
 
 
 def calculate_cost(state: MarketResearchState) -> dict:

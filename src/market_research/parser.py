@@ -14,6 +14,7 @@ COMMON_WORDS = {
     "COST",
     "LATEST",
     "NEWS",
+    "ABOUT",
     "AND",
 }
 
