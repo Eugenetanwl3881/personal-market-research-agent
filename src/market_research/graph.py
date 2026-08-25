@@ -1,5 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
+from .guardrails import check_scope
 from .state import MarketResearchState
 
 
@@ -9,7 +10,29 @@ def _complete(state: MarketResearchState, step: str) -> dict:
 
 
 def scope_check(state: MarketResearchState) -> dict:
-    return _complete(state, "scope_check")
+    accepted, message = check_scope(state["question"])
+    step_update = _complete(state, "scope_check")
+
+    if accepted:
+        return {
+            **step_update,
+            "intent": "market_research",
+        }
+
+    return {
+        **step_update,
+        "intent": "refused",
+        "errors": [message],
+        "final_answer": message,
+    }
+
+
+def route_after_scope_check(state: MarketResearchState) -> str:
+    """Choose whether the graph continues or ends after scope validation."""
+    if state.get("intent") == "refused":
+        return "refused"
+
+    return "continue"
 
 
 def parse_request(state: MarketResearchState) -> dict:
@@ -46,7 +69,14 @@ def build_graph():
     workflow.add_node("write_answer", write_answer)
 
     workflow.add_edge(START, "scope_check")
-    workflow.add_edge("scope_check", "parse_request")
+    workflow.add_conditional_edges(
+        "scope_check",
+        route_after_scope_check,
+        {
+            "continue": "parse_request",
+            "refused": END,
+        },
+    )
     workflow.add_edge("parse_request", "fetch_quote")
     workflow.add_edge("fetch_quote", "fetch_news")
     workflow.add_edge("fetch_news", "calculate_cost")
