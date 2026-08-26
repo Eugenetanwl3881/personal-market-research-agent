@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import os
 
 import yfinance as yf
@@ -29,9 +30,17 @@ def get_stock_quote(ticker: str) -> dict:
     if latest_close.empty:
         raise ValueError(f"No closing price found for ticker: {symbol}")
 
+    try:
+        currency = stock.fast_info.get("currency", "USD")
+    except Exception:
+        currency = "USD"
+
     return {
         "ticker": symbol,
         "price": float(latest_close.iloc[-1]),
+        "currency": currency,
+        "price_timestamp": latest_close.index[-1].isoformat(),
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "source": "Yahoo Finance",
     }
 
