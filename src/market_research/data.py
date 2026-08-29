@@ -9,6 +9,19 @@ from tavily import TavilyClient
 load_dotenv()
 
 
+def format_timestamp(timestamp: str) -> str:
+    """Convert an ISO timestamp into a concise, human-readable UTC/local timestamp."""
+    parsed = datetime.fromisoformat(timestamp)
+    timezone_name = parsed.tzname() or "UTC"
+    hour = parsed.hour % 12 or 12
+    meridiem = "AM" if parsed.hour < 12 else "PM"
+
+    return (
+        f"{parsed.strftime('%B')} {parsed.day}, {parsed.year} at "
+        f"{hour}:{parsed.minute:02d} {meridiem} {timezone_name}"
+    )
+
+
 def get_stock_quote(ticker: str) -> dict:
     """Retrieve the latest available quote for a stock ticker."""
     symbol = ticker.strip().upper()
@@ -35,12 +48,18 @@ def get_stock_quote(ticker: str) -> dict:
     except Exception:
         currency = "USD"
 
+    retrieved_at = datetime.now(timezone.utc).isoformat()
+
     return {
         "ticker": symbol,
         "price": float(latest_close.iloc[-1]),
         "currency": currency,
         "price_timestamp": latest_close.index[-1].isoformat(),
-        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "price_timestamp_display": format_timestamp(
+            latest_close.index[-1].isoformat()
+        ),
+        "retrieved_at": retrieved_at,
+        "retrieved_at_display": format_timestamp(retrieved_at),
         "source": "Yahoo Finance",
     }
 
