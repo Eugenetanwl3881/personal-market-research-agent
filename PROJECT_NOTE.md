@@ -49,6 +49,38 @@ END
 
 Nodes perform work, edges determine the order of that work, and state carries shared information between nodes.
 
+### Current conditional flow
+
+```mermaid
+flowchart TD
+    START([START]) --> S[scope_check]
+    S -->|refused| END1([END])
+    S -->|accepted| P[parse_request]
+
+    P -->|needs_quote| Q[fetch_quote]
+    P -->|news only| N[fetch_news]
+    P -->|no data needed| A[write_answer]
+
+    Q -->|needs_news| N
+    Q -->|shares provided| C[calculate_cost]
+    Q -->|no news or shares| A
+
+    N -->|shares provided| C
+    N -->|no shares| A
+    C --> A
+    A --> END2([END])
+```
+
+The parser decides what information is needed. The graph then skips unnecessary work instead of always calling quote retrieval, news search, and cost calculation.
+
+| Request type | Graph path |
+| --- | --- |
+| Quote only | `scope_check → parse_request → fetch_quote → write_answer` |
+| News only | `scope_check → parse_request → fetch_news → write_answer` |
+| Quote and cost | `scope_check → parse_request → fetch_quote → calculate_cost → write_answer` |
+| Quote, news, and cost | `scope_check → parse_request → fetch_quote → fetch_news → calculate_cost → write_answer` |
+| Refused request | `scope_check → END` |
+
 ## Proposed graph state
 
 ```text

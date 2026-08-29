@@ -45,4 +45,4 @@ def check_scope(question: str) -> tuple[bool, str]:
     if not any(term in normalized for term in RESEARCH_TERMS):
         return False, "I can only help with stock prices, share calculations, and recent market news."
 
-    return True, ""
+    return True, "" 

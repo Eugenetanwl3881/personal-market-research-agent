@@ -52,6 +52,17 @@ def parse_request(state: MarketResearchState) -> dict:
     }
 
 
+def route_after_parse(state: MarketResearchState) -> str:
+    """Choose the first data step required by the parsed request."""
+    if state.get("needs_quote"):
+        return "fetch_quote"
+
+    if state.get("needs_news"):
+        return "fetch_news"
+
+    return "write_answer"
+
+
 def fetch_quote(state: MarketResearchState) -> dict:
     quotes = {}
     errors = list(state.get("errors", []))
@@ -71,6 +82,17 @@ def fetch_quote(state: MarketResearchState) -> dict:
         update["errors"] = errors
 
     return update
+
+
+def route_after_quote(state: MarketResearchState) -> str:
+    """Choose the next step after quote retrieval."""
+    if state.get("needs_news"):
+        return "fetch_news"
+
+    if state.get("shares") is not None:
+        return "calculate_cost"
+
+    return "write_answer"
 
 
 def fetch_news(state: MarketResearchState) -> dict:
@@ -93,6 +115,14 @@ def fetch_news(state: MarketResearchState) -> dict:
             "news": [],
             "errors": errors,
         }
+
+
+def route_after_news(state: MarketResearchState) -> str:
+    """Choose whether a news request also needs a cost calculation."""
+    if state.get("shares") is not None:
+        return "calculate_cost"
+
+    return "write_answer"
 
 
 def calculate_cost(state: MarketResearchState) -> dict:
@@ -154,9 +184,32 @@ def build_graph():
             "refused": END,
         },
     )
-    workflow.add_edge("parse_request", "fetch_quote")
-    workflow.add_edge("fetch_quote", "fetch_news")
-    workflow.add_edge("fetch_news", "calculate_cost")
+    workflow.add_conditional_edges(
+        "parse_request",
+        route_after_parse,
+        {
+            "fetch_quote": "fetch_quote",
+            "fetch_news": "fetch_news",
+            "write_answer": "write_answer",
+        },
+    )
+    workflow.add_conditional_edges(
+        "fetch_quote",
+        route_after_quote,
+        {
+            "fetch_news": "fetch_news",
+            "calculate_cost": "calculate_cost",
+            "write_answer": "write_answer",
+        },
+    )
+    workflow.add_conditional_edges(
+        "fetch_news",
+        route_after_news,
+        {
+            "calculate_cost": "calculate_cost",
+            "write_answer": "write_answer",
+        },
+    )
     workflow.add_edge("calculate_cost", "write_answer")
     workflow.add_edge("write_answer", END)
 
