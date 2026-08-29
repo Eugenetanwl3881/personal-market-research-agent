@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import os
+from urllib.parse import urlparse
 
 import yfinance as yf
 from dotenv import load_dotenv
@@ -20,6 +21,12 @@ def format_timestamp(timestamp: str) -> str:
         f"{parsed.strftime('%B')} {parsed.day}, {parsed.year} at "
         f"{hour}:{parsed.minute:02d} {meridiem} {timezone_name}"
     )
+
+
+def publisher_from_url(url: str) -> str:
+    """Return a readable publisher fallback from a source URL."""
+    hostname = urlparse(url).netloc.lower().removeprefix("www.")
+    return hostname or "Unknown publisher"
 
 
 def get_stock_quote(ticker: str) -> dict:
@@ -55,6 +62,7 @@ def get_stock_quote(ticker: str) -> dict:
         "price": float(latest_close.iloc[-1]),
         "currency": currency,
         "price_timestamp": latest_close.index[-1].isoformat(),
+        "market_timestamp": latest_close.index[-1].isoformat(),
         "price_timestamp_display": format_timestamp(
             latest_close.index[-1].isoformat()
         ),
@@ -83,12 +91,18 @@ def search_market_news(query: str) -> list[dict]:
         max_results=5,
     )
 
-    return [
-        {
-            "title": result.get("title", ""),
-            "url": result.get("url", ""),
-            "content": result.get("content", ""),
-            "published_date": result.get("published_date"),
-        }
-        for result in response.get("results", [])
-    ]
+    news = []
+    for result in response.get("results", []):
+        url = result.get("url", "")
+        published_timestamp = result.get("published_date")
+        news.append(
+            {
+                "title": result.get("title", ""),
+                "publisher": result.get("source") or publisher_from_url(url),
+                "published_timestamp": published_timestamp,
+                "url": url,
+                "content": result.get("content", ""),
+            }
+        )
+
+    return news
