@@ -1,6 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
-from .answer import write_market_answer
+from .answer import create_model, write_market_answer
 from .calculations import calculate_share_cost
 from .data import get_stock_quote, search_market_news
 from .guardrails import check_scope
@@ -40,12 +40,15 @@ def route_after_scope_check(state: MarketResearchState) -> str:
 
 
 def parse_request(state: MarketResearchState) -> dict:
-    parsed = parse_market_request(state["question"])
+    parsed = parse_market_request(state["question"], model=create_model())
 
     return {
         **_complete(state, "parse_request"),
+        "intent": parsed["intent"],
         "ticker": parsed["ticker"],
         "shares": parsed["shares"],
+        "needs_quote": parsed["needs_quote"],
+        "needs_news": parsed["needs_news"],
     }
 
 
