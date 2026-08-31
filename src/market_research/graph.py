@@ -40,7 +40,16 @@ def route_after_scope_check(state: MarketResearchState) -> str:
 
 
 def parse_request(state: MarketResearchState) -> dict:
-    parsed = parse_market_request(state["question"], model=create_model())
+    try:
+        parsed = parse_market_request(state["question"], model=create_model())
+    except Exception as exc:
+        return {
+            **_complete(state, "parse_request"),
+            "intent": "error",
+            "ticker": [],
+            "shares": None,
+            "errors": [f"Could not parse the request: {exc}"],
+        }
 
     return {
         **_complete(state, "parse_request"),
@@ -54,6 +63,9 @@ def parse_request(state: MarketResearchState) -> dict:
 
 def route_after_parse(state: MarketResearchState) -> str:
     """Choose the first data step required by the parsed request."""
+    if not state.get("ticker") or state.get("intent") == "error":
+        return "partial_answer"
+
     if state.get("needs_quote"):
         return "fetch_quote"
 
@@ -86,6 +98,9 @@ def fetch_quote(state: MarketResearchState) -> dict:
 
 def route_after_quote(state: MarketResearchState) -> str:
     """Choose the next step after quote retrieval."""
+    if not state.get("quote"):
+        return "partial_answer"
+
     if state.get("needs_news"):
         return "fetch_news"
 
@@ -104,6 +119,7 @@ def fetch_news(state: MarketResearchState) -> dict:
         return {
             **_complete(state, "fetch_news"),
             "news": news,
+            "news_status": "ok" if news else "no_results",
         }
     except (ValueError, RuntimeError) as exc:
         errors = [
@@ -113,6 +129,7 @@ def fetch_news(state: MarketResearchState) -> dict:
         return {
             **_complete(state, "fetch_news"),
             "news": [],
+            "news_status": "error",
             "errors": errors,
         }
 
@@ -159,10 +176,49 @@ def calculate_cost(state: MarketResearchState) -> dict:
 
 
 def write_answer(state: MarketResearchState) -> dict:
+    try:
+        final_answer = write_market_answer(state)
+    except Exception as exc:
+        errors = [
+            *state.get("errors", []),
+            f"Could not generate the model answer: {exc}",
+        ]
+        return {
+            **_complete(state, "write_answer"),
+            "final_answer": write_partial_answer({**state, "errors": errors}),
+            "errors": errors,
+        }
+
     return {
         **_complete(state, "write_answer"),
-        "final_answer": write_market_answer(state),
+        "final_answer": final_answer,
     }
+
+
+def write_partial_answer(state: MarketResearchState) -> str:
+    """Return a deterministic answer when parsing or model generation fails."""
+    lines = [
+        "I could not complete the full market-research request.",
+    ]
+
+    quotes = state.get("quote", {})
+    for ticker, quote in quotes.items():
+        currency = quote.get("currency", "")
+        lines.append(
+            f"Latest available close for {ticker}: "
+            f"{quote.get('price', 'unavailable')} {currency}."
+        )
+
+    calculation = state.get("calculation")
+    if calculation and calculation != "No calculations available.":
+        lines.append(calculation)
+
+    errors = state.get("errors", [])
+    if errors:
+        lines.append("Details: " + " ".join(errors))
+
+    lines.append("This is informational market research, not investment advice.")
+    return "\n".join(lines)
 
 
 def build_graph():
@@ -174,6 +230,10 @@ def build_graph():
     workflow.add_node("fetch_news", fetch_news)
     workflow.add_node("calculate_cost", calculate_cost)
     workflow.add_node("write_answer", write_answer)
+    workflow.add_node("write_partial_answer", lambda state: {
+        **_complete(state, "write_partial_answer"),
+        "final_answer": write_partial_answer(state),
+    })
 
     workflow.add_edge(START, "scope_check")
     workflow.add_conditional_edges(
@@ -191,6 +251,7 @@ def build_graph():
             "fetch_quote": "fetch_quote",
             "fetch_news": "fetch_news",
             "write_answer": "write_answer",
+            "partial_answer": "write_partial_answer",
         },
     )
     workflow.add_conditional_edges(
@@ -200,6 +261,7 @@ def build_graph():
             "fetch_news": "fetch_news",
             "calculate_cost": "calculate_cost",
             "write_answer": "write_answer",
+            "partial_answer": "write_partial_answer",
         },
     )
     workflow.add_conditional_edges(
@@ -212,6 +274,7 @@ def build_graph():
     )
     workflow.add_edge("calculate_cost", "write_answer")
     workflow.add_edge("write_answer", END)
+    workflow.add_edge("write_partial_answer", END)
 
     return workflow.compile()
 

@@ -42,6 +42,9 @@ Quotes:
 News:
 {state.get("news", [])}
 
+News status:
+{state.get("news_status", "not requested")}
+
 Calculation:
 {state.get("calculation", "")}
 

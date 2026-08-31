@@ -10,6 +10,7 @@ class MarketResearchState(TypedDict, total=False):
     needs_news: bool
     quote: dict[str, Any]
     news: list[dict[str, Any]]
+    news_status: str
     calculation: str
     errors: list[str]
     final_answer: str
