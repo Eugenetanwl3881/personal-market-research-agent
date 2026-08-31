@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import os
 from urllib.parse import urlparse
 
@@ -23,10 +23,43 @@ def format_timestamp(timestamp: str) -> str:
     )
 
 
+def format_trading_date(timestamp: str) -> str:
+    """Format a daily-bar timestamp as a trading date without implying a time."""
+    parsed = datetime.fromisoformat(timestamp)
+    return parsed.strftime("%B") + f" {parsed.day}, {parsed.year}"
+
+
 def publisher_from_url(url: str) -> str:
     """Return a readable publisher fallback from a source URL."""
     hostname = urlparse(url).netloc.lower().removeprefix("www.")
     return hostname or "Unknown publisher"
+
+
+def classify_freshness(price_timestamp: str, retrieved_at: str) -> str:
+    """Classify a closing price using elapsed weekdays, excluding weekends."""
+    price_time = datetime.fromisoformat(price_timestamp)
+    retrieval_time = datetime.fromisoformat(retrieved_at)
+
+    if price_time.tzinfo is None:
+        price_time = price_time.replace(tzinfo=timezone.utc)
+    if retrieval_time.tzinfo is None:
+        retrieval_time = retrieval_time.replace(tzinfo=timezone.utc)
+
+    price_time_local = price_time.astimezone(retrieval_time.tzinfo)
+    price_date = price_time_local.date()
+    retrieval_date = retrieval_time.date()
+
+    if price_date == retrieval_date:
+        return "same_trading_day"
+
+    elapsed_weekdays = sum(
+        (price_date + timedelta(days=offset)).weekday() < 5
+        for offset in range(1, (retrieval_date - price_date).days + 1)
+    )
+
+    if elapsed_weekdays <= 1:
+        return "prior_trading_session"
+    return "stale"
 
 
 def get_stock_quote(ticker: str) -> dict:
@@ -56,18 +89,20 @@ def get_stock_quote(ticker: str) -> dict:
         currency = "USD"
 
     retrieved_at = datetime.now(timezone.utc).isoformat()
+    price_timestamp = latest_close.index[-1].isoformat()
 
     return {
         "ticker": symbol,
         "price": float(latest_close.iloc[-1]),
         "currency": currency,
-        "price_timestamp": latest_close.index[-1].isoformat(),
-        "market_timestamp": latest_close.index[-1].isoformat(),
-        "price_timestamp_display": format_timestamp(
-            latest_close.index[-1].isoformat()
-        ),
+        "price_type": "latest_available_close",
+        "price_timestamp": price_timestamp,
+        "market_timestamp": price_timestamp,
+        "price_timestamp_display": format_trading_date(price_timestamp),
+        "trading_date": format_trading_date(price_timestamp),
         "retrieved_at": retrieved_at,
         "retrieved_at_display": format_timestamp(retrieved_at),
+        "freshness_status": classify_freshness(price_timestamp, retrieved_at),
         "source": "Yahoo Finance",
     }
 
@@ -85,14 +120,26 @@ def search_market_news(query: str) -> list[dict]:
 
     client = TavilyClient(api_key=api_key)
     response = client.search(
-        query=search_query,
-        topic="news",
+        query=f"{search_query} latest",
+        topic="finance",
         search_depth="basic",
+        time_range="day",
         max_results=5,
     )
 
+    results = response.get("results", [])
+    if len(results) < 2:
+        response = client.search(
+            query=f"{search_query} latest",
+            topic="finance",
+            search_depth="basic",
+            time_range="week",
+            max_results=5,
+        )
+        results = response.get("results", [])
+
     news = []
-    for result in response.get("results", []):
+    for result in results:
         url = result.get("url", "")
         published_timestamp = result.get("published_date")
         news.append(

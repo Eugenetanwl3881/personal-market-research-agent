@@ -51,8 +51,11 @@ Errors:
 Rules:
 - Be factual and concise.
 - Use the quote's currency, price_timestamp, and source fields.
-- Describe prices as "latest available" unless the data explicitly proves they are live.
-- Include the price timestamp and retrieval timestamp when quote data is available.
+- Use price_type and freshness_status to describe the quote accurately.
+- Never call a latest closing price a live price.
+- Include the trading date and retrieval timestamp when quote data is available.
+- Daily closing-price timestamps represent a trading date; do not present midnight as the market close time.
+- Explain freshness using freshness_status. Weekends and non-trading days should not by themselves be called stale.
 - Clearly mention unavailable or failed data instead of guessing.
 - Treat quote fields as verified only within the stated source and timestamp.
 - Label news as reported information; identify analyst opinions, fair-value estimates, and predictions as opinions or estimates.
