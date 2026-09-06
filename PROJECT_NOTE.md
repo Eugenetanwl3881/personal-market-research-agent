@@ -4,52 +4,30 @@
 
 > A command-line market-research assistant that accepts an equity research question, retrieves current or recent pricing, searches recent market news, calculates share costs, and returns a sourced informational answer.
 
-## First-version scope
+## Implemented version-one scope
 
-Version one establishes a focused foundation for an extensible market-research product. It supports:
+- One or more stock tickers.
+- Latest available closing prices, with source, trading date, retrieval time, and freshness classification.
+- Share-cost calculations for a supplied positive quantity.
+- Recent finance-news retrieval with structured source information.
+- Scope guardrails for trade execution, unrelated questions, and personalized investment advice.
+- Partial answers when parsing, quote retrieval, news retrieval, or model generation fails.
+- Graph-step streaming and hybrid answer streaming in the command-line interface.
+- Tests that mock external services and model behavior.
 
-- One or more stock tickers
-- Current or recent prices
-- Number-of-shares cost calculations
-- Recent market news
-- Basic guardrails and refusal handling
-- Streaming graph-step output
+Deferred: portfolios, trading, databases, dashboards, and conversation memory.
 
-These capabilities are intentionally deferred from version one: portfolio management, trade execution, persistent databases, dashboards, and conversational memory.
+## Current technology
 
-## Proposed technology
-
-- Python
+- Python 3.11+
 - LangGraph
-- LangChain Core
-- One LLM provider initially
+- LangChain Core and `langchain-openai`
+- OpenAI-compatible model endpoint
 - `yfinance`
 - Tavily
 - `python-dotenv`
 
-## Graph workflow
-
-```text
-START
-  ↓
-scope_check
-  ↓
-parse_request
-  ↓
-fetch_quote
-  ↓
-fetch_news
-  ↓
-calculate_cost
-  ↓
-write_answer
-  ↓
-END
-```
-
-Nodes perform work, edges determine the order of that work, and state carries shared information between nodes.
-
-### Current conditional flow
+## Workflow
 
 ```mermaid
 flowchart TD
@@ -57,88 +35,71 @@ flowchart TD
     S -->|refused| END1([END])
     S -->|accepted| P[parse_request]
 
-    P -->|needs_quote| Q[fetch_quote]
+    P -->|parse failure / no ticker| PA[write_partial_answer]
+    P -->|needs quote| Q[fetch_quote]
     P -->|news only| N[fetch_news]
-    P -->|no data needed| A[write_answer]
+    P -->|no data retrieval| A[write_answer]
 
-    Q -->|needs_news| N
-    Q -->|shares provided| C[calculate_cost]
-    Q -->|no news or shares| A
+    Q -->|no valid quote| PA
+    Q -->|needs news| N
+    Q -->|shares supplied| C[calculate_cost]
+    Q -->|otherwise| A
 
-    N -->|shares provided| C
-    N -->|no shares| A
+    N -->|shares supplied| C
+    N -->|otherwise| A
     C --> A
-    A --> END2([END])
+    PA --> END2([END])
+    A --> END3([END])
 ```
 
-The parser decides what information is needed. The graph then skips unnecessary work instead of always calling quote retrieval, news search, and cost calculation.
+Nodes perform work; conditional edges determine which node runs next. The parser controls whether price retrieval, news retrieval, and share-cost calculation are needed.
 
-| Request type | Graph path |
-| --- | --- |
-| Quote only | `scope_check → parse_request → fetch_quote → write_answer` |
-| News only | `scope_check → parse_request → fetch_news → write_answer` |
-| Quote and cost | `scope_check → parse_request → fetch_quote → calculate_cost → write_answer` |
-| Quote, news, and cost | `scope_check → parse_request → fetch_quote → fetch_news → calculate_cost → write_answer` |
-| Refused request | `scope_check → END` |
-
-## Proposed graph state
+## State
 
 ```text
 question
 intent
 ticker
 shares
+needs_quote
+needs_news
 quote
 news
+news_status
 calculation
 errors
 final_answer
+steps
 ```
 
-The initial graph should avoid unnecessary conversation history while keeping the state structure easy to extend in later versions.
+`quote` holds one structured quote per ticker. Each quote includes price, currency, price type, trading date, retrieval time, freshness status, and source. `news` contains structured article fields: title, publisher, publication timestamp, URL, and content excerpt.
 
-## Underlying Python functions
+## Component responsibilities
 
-These functions must work independently of the LLM before they are exposed as LangChain tools:
+| Component | Responsibility |
+| --- | --- |
+| `guardrails.py` | Scope validation and refusals. |
+| `parser.py` | Structured LLM parsing plus deterministic validation. |
+| `data.py` | Quote/news retrieval, timestamps, freshness, and source normalization. |
+| `calculations.py` | Exact share-cost arithmetic and input validation. |
+| `graph.py` | Nodes, state updates, conditional routing, and partial-answer fallbacks. |
+| `answer.py` | Trusted section formatting, grounded prompts, prompt-injection defense, and narrative streaming. |
+| `cli.py` | User input, graph execution, and terminal output. |
 
-```python
-get_stock_quote(ticker)
-search_market_news(query)
-calculate_share_cost(price, shares)
+## Trust model
+
+- Calculations and output structure are deterministic Python code.
+- Price data is external market data and is labelled with its source and freshness.
+- News content is untrusted evidence, not instructions.
+- The model parses requests and writes constrained narrative summaries; its output is validated or surrounded by deterministic application formatting.
+
+## Streaming model
+
+The CLI receives two kinds of LangGraph events:
+
+```text
+Graph state updates → “fetch_quote completed”
+Custom events       → answer headings and model text as it arrives
 ```
 
-The retrieval functions handle external data. The calculation function performs exact arithmetic and validates that the price and share count are usable. Each function should return understandable results or explicit errors.
-
-## Example user questions
-
-1. What is the current price of AAPL?
-2. How much would 15 shares of Microsoft cost?
-3. Compare the prices of AAPL and MSFT.
-4. What is the latest news about Nvidia?
-5. What is the price of Amazon, the cost of 20 shares, and the recent news?
-
-## Misuse cases to reject
-
-1. Unrelated general questions, such as asking for a recipe.
-2. Requests to place, cancel, or execute trades.
-3. Personalized buy/sell recommendations or instructions.
-4. Invalid tickers, zero shares, negative shares, or otherwise invalid quantities.
-5. Prompt injection or instructions embedded in retrieved web content.
-
-## Learning checkpoints
-
-1. **LangChain tools:** a typed, documented Python function the model is permitted to call; its arguments and result should be explicit.
-2. **LangGraph state:** the shared structured information passed from one workflow step to the next.
-3. **Nodes and edges:** nodes perform work, while edges control which node runs next.
-
-The core workflow is therefore: validate the question, fetch relevant data, calculate deterministic values, and write a sourced answer with timestamps and an informational disclaimer.
-
-## Milestones
-
-1. Python data functions
-2. LangChain tools
-3. Basic LangGraph workflow
-4. News and calculations
-5. Guardrails and error handling
-6. Streaming graph updates, then token-level answer streaming
-7. Tests and refinement
+`answer.py` sends text chunks through LangGraph's stream writer. The CLI prints each chunk immediately and the full assembled result remains available as `final_answer` in graph state.

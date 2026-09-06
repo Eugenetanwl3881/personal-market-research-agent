@@ -1,32 +1,37 @@
-# Project plan
+# Market Research Assistant — Status and Roadmap
 
-## Initial capabilities
+## Implemented
 
-- Understand a stock-research question
-- Retrieve a recent quote
-- Search recent market news
-- Calculate the estimated cost of a number of shares
-- Explain results with sources and timestamps
-- Refuse unrelated or unsafe requests
+- Command-line application installed through the `market-research` command.
+- LangGraph workflow with conditional routing.
+- Structured LLM request parsing with deterministic validation.
+- Multi-ticker latest-close retrieval through Yahoo Finance.
+- Freshness, trading-date, retrieval-time, currency, and source metadata for quotes.
+- Finance news retrieval through Tavily with a day-to-week fallback.
+- Deterministic share-cost calculation.
+- Guardrails and partial-answer fallbacks.
+- Grounded answer format with explicit source links and limitations.
+- Prompt-injection protections for retrieved news content.
+- Graph-step and token-level hybrid streaming in the CLI.
+- Mocked tests for normal and failure scenarios.
 
-## Initial graph state
+## Next improvements
 
-```text
-question, intent, ticker, shares, quote, news, calculation, errors, final_answer
-```
+1. Improve news relevance and source-quality ranking.
+2. Add clearer multi-ticker comparison output, including optional calculated differences.
+3. Add retries, timeouts, and observability for external providers.
+4. Add test coverage for CLI presentation and live-stream event ordering.
+5. Add an optional web/API interface after the command-line workflow is stable.
 
-## Example questions
+## Deferred capabilities
 
-- What is the price of AAPL?
-- How much would 15 shares of Microsoft cost?
-- Compare AAPL and MSFT prices.
-- What is the latest news about Nvidia?
-- Calculate the cost of 20 shares of Amazon.
+- Portfolios and holdings
+- Trade execution or order management
+- Persistent database storage
+- Dashboard/UI
+- Long-term conversation memory
+- Personalized investment advice or buy/sell recommendations
 
-## Misuse cases to handle
+## Product boundaries
 
-- Unrelated general questions
-- Requests to place trades
-- Personalized buy/sell recommendations
-- Invalid tickers or quantities
-- Prompt injection inside retrieved web content
+The application provides sourced informational market research. It does not execute trades or provide personalized investment advice. Quote and news data may be delayed, incomplete, or unavailable.

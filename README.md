@@ -1,42 +1,127 @@
 # Market Research Assistant
 
-A conversational financial-market research assistant built with LangChain and LangGraph, designed as a focused foundation for future expansion.
+A command-line application for sourced, informational equity-market research. It retrieves the latest available closing prices, searches recent news, calculates estimated share costs, and presents the result with sources, timestamps, freshness information, and an investment-advice disclaimer.
 
-## First version
 
-The first version accepts a natural-language stock question, retrieves market data, searches recent news, performs deterministic calculations, and returns a sourced informational answer.
+## What it does
 
-Example query:
+- Interprets one or more ticker symbols and an optional share quantity from a natural-language question.
+- Retrieves the latest available closing price from Yahoo Finance through `yfinance`.
+- Searches finance news through Tavily, preferring the past day and falling back to the past week when results are sparse.
+- Calculates share costs deterministically in Python.
+- Labels price type, trading date, retrieval time, source, and freshness.
+- Separates verified quote data from reported news and model-written summaries.
+- Refuses trade execution, unrelated requests, and personalized investment-advice requests.
+- Streams workflow progress and answer text in the terminal.
 
-> What is the price of AAPL, how much for 15 shares, and what is the latest news?
-
-The system is designed to provide timely market context, recent news, and transparent calculations through a conversational interface.
-
-## Planned workflow
+## Architecture
 
 ```text
-Question → scope check → parse request → fetch quote/news → calculate → answer
+CLI question
+  ↓
+LangGraph workflow
+  ↓
+scope check → structured parsing → quote/news retrieval → calculation → answer
+  ↓
+terminal progress updates + streamed answer text
 ```
 
-## Planned stack
+The graph coordinates the work. External retrieval and arithmetic remain ordinary Python functions, independent of the language model.
+
+```mermaid
+flowchart TD
+    START([START]) --> S[scope_check]
+    S -->|refused| END1([END])
+    S -->|accepted| P[parse_request]
+
+    P -->|parse failure or no ticker| PA[write_partial_answer]
+    P -->|quote needed| Q[fetch_quote]
+    P -->|news only| N[fetch_news]
+    P -->|no retrieval needed| A[write_answer]
+
+    Q -->|no valid quote| PA
+    Q -->|news requested| N
+    Q -->|shares supplied| C[calculate_cost]
+    Q -->|otherwise| A
+
+    N -->|shares supplied| C
+    N -->|otherwise| A
+    C --> A
+    PA --> END2([END])
+    A --> END3([END])
+```
+
+## Technology
 
 - Python 3.11+
 - LangGraph
-- LangChain Core and one chat-model integration
-- yfinance for educational market-data access
-- Tavily for web/news search
-- python-dotenv for local secrets
+- LangChain Core and `langchain-openai`
+- An OpenAI-compatible model endpoint (currently configured for OpenCode Go)
+- `yfinance`
+- Tavily
+- `python-dotenv`
 
-## Safety boundaries
+## Setup
 
-The assistant is for informational market research and calculations. It will not place trades or provide personalized financial advice.
+Create and activate a virtual environment, then install the project in editable mode:
 
-Market data may be delayed or incomplete. Nothing produced by this project is investment advice.
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
 
-## Development milestones
+Create a `.env` file in the project root. Never commit this file.
 
-1. Define and test plain Python data and calculation functions.
-2. Wrap those functions as LangChain tools.
-3. Build the basic LangGraph state and workflow.
-4. Add news, calculations, guardrails, and error handling.
-5. Add streaming execution and tests.
+```dotenv
+TAVILY_API_KEY=your_tavily_key
+OPENCODE_API_KEY=your_opencode_key
+OPENCODE_BASE_URL=https://opencode.ai/zen/go/v1
+OPENCODE_MODEL=deepseek-v4-flash
+```
+
+The model endpoint and model name are configurable so the application can later use another compatible provider without changing workflow code.
+
+## Usage
+
+After installation, run either form:
+
+```bash
+market-research "What was the latest available closing price of NVDA, how much would 8 shares cost, and what recent news was reported?"
+```
+
+```bash
+python -m market_research.cli "Compare AAPL and MSFT prices."
+```
+
+Running `market-research` with no question starts an interactive prompt.
+
+## Output design
+
+Python renders predictable, data-sensitive sections:
+
+- Summary
+- Quotes
+- Estimated share cost, when shares are requested
+- Recent news and source links
+- Data limitations
+- Disclaimer
+
+The language model writes only the narrative summary and news summaries. Quotes, sources, arithmetic, timestamps, and disclaimers are rendered by application code. News excerpts are treated as untrusted data and explicitly delimited in the model prompt; instructions inside articles are ignored.
+
+## Testing
+
+Run the test suite with:
+
+```bash
+python -m pytest -q
+```
+
+External services are mocked in the normal tests, so they are fast, deterministic, and do not consume Yahoo, Tavily, or model API requests.
+
+## Current limitations
+
+- Prices are latest available closes, not guaranteed live prices.
+- Yahoo Finance and Tavily data can be delayed, incomplete, or unavailable.
+- The first version has no portfolios, trade execution, database, dashboard, or conversation memory.
+- The assistant does not provide personalized buy/sell recommendations. (YET)
