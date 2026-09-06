@@ -23,19 +23,32 @@ def main() -> None:
 
     graph = build_graph()
     final_state = {}
+    streamed_answer = False
 
     print("Steps:")
-    for update in graph.stream(
+    for mode, data in graph.stream(
         {"question": question},
-        stream_mode="updates",
+        stream_mode=["updates", "custom"],
     ):
-        final_state.update(next(iter(update.values())))
+        if mode == "custom":
+            if data.get("type") == "answer_section":
+                print(data["text"], end="", flush=True)
+                streamed_answer = True
+            elif data.get("type") == "answer_token":
+                print(data["text"], end="", flush=True)
+                streamed_answer = True
+            continue
+
+        final_state.update(next(iter(data.values())))
         step_updates = final_state.get("steps", [])
         if step_updates:
             print(f"- {step_updates[-1]}")
 
-    print("\nFinal answer:")
-    print(final_state.get("final_answer", "No final answer was produced."))
+    if not streamed_answer:
+        print("\nFinal answer:")
+        print(final_state.get("final_answer", "No final answer was produced."))
+    else:
+        print()
 
     errors = final_state.get("errors", [])
     if errors:

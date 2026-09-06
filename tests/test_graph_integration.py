@@ -9,7 +9,11 @@ def configure_graph_dependencies(monkeypatch, parsed_request, answer="Mock final
         "parse_market_request",
         lambda question, model: parsed_request,
     )
-    monkeypatch.setattr(graph_module, "write_market_answer", lambda state: answer)
+    monkeypatch.setattr(
+        graph_module,
+        "write_market_answer",
+        lambda state, stream_writer=None: answer,
+    )
 
 
 def quote(ticker):
@@ -184,7 +188,7 @@ def test_final_model_failure_uses_deterministic_fallback(monkeypatch):
     monkeypatch.setattr(
         graph_module,
         "write_market_answer",
-        lambda state: (_ for _ in ()).throw(RuntimeError("Model unavailable.")),
+        lambda state, stream_writer=None: (_ for _ in ()).throw(RuntimeError("Model unavailable.")),
     )
 
     result = graph_module.build_graph().invoke({"question": "What is the price of AAPL?"})

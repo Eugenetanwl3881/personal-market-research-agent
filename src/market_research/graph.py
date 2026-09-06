@@ -1,3 +1,4 @@
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from .answer import create_model, write_market_answer
@@ -177,7 +178,10 @@ def calculate_cost(state: MarketResearchState) -> dict:
 
 def write_answer(state: MarketResearchState) -> dict:
     try:
-        final_answer = write_market_answer(state)
+        final_answer = write_market_answer(
+            state,
+            stream_writer=get_stream_writer(),
+        )
     except Exception as exc:
         errors = [
             *state.get("errors", []),
