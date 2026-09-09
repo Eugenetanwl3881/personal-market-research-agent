@@ -90,6 +90,7 @@ def build_knowledge_retriever(
         embedding=embeddings or create_embeddings(),
     )
     vector_store.add_documents(chunks)
+    #k=4 means return the four most relevant chunks for each query.
     return vector_store.as_retriever(search_kwargs={"k": k})
 
 
