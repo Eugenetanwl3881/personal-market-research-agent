@@ -1,6 +1,9 @@
 langgraph
 langchain-core
 langchain-openai
+langchain-text-splitters
+langchain-huggingface
+sentence-transformers
 yfinance
 tavily-python
 python-dotenv
