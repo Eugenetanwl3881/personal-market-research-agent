@@ -1,4 +1,5 @@
 from market_research.graph import (
+    route_after_calculation,
     route_after_parse,
     route_after_quote,
     route_after_news,
@@ -22,8 +23,21 @@ def test_successful_quote_can_continue_to_news():
     }) == "fetch_news"
 
 
+def test_quote_can_continue_to_reference_context():
+    assert route_after_quote({
+        "quote": {"AAPL": {"price": 100}},
+        "needs_context": True,
+        "needs_news": False,
+        "shares": None,
+    }) == "retrieve_context"
+
+
 def test_news_without_results_can_still_answer():
     assert route_after_news({"shares": None}) == "write_answer"
+
+
+def test_calculation_can_continue_to_reference_context():
+    assert route_after_calculation({"needs_context": True}) == "retrieve_context"
 
 
 def test_partial_answer_includes_available_quote_and_errors():

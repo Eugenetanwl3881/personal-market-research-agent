@@ -6,11 +6,12 @@ from .calculations import calculate_share_cost
 from .data import get_stock_quote, search_market_news
 from .guardrails import check_scope
 from .parser import parse_market_request
+from .rag import search_knowledge
 from .state import MarketResearchState
 
 
 def _complete(state: MarketResearchState, step: str) -> dict:
-    """Record a completed step while the graph is still a learning skeleton."""
+    """Record a completed node for CLI progress output."""
     return {"steps": [*state.get("steps", []), f"{step} completed"]}
 
 
@@ -59,6 +60,7 @@ def parse_request(state: MarketResearchState) -> dict:
         "shares": parsed["shares"],
         "needs_quote": parsed["needs_quote"],
         "needs_news": parsed["needs_news"],
+        "needs_context": parsed.get("needs_context", False),
     }
 
 
@@ -72,6 +74,9 @@ def route_after_parse(state: MarketResearchState) -> str:
 
     if state.get("needs_news"):
         return "fetch_news"
+
+    if state.get("needs_context"):
+        return "retrieve_context"
 
     return "write_answer"
 
@@ -108,6 +113,9 @@ def route_after_quote(state: MarketResearchState) -> str:
     if state.get("shares") is not None:
         return "calculate_cost"
 
+    if state.get("needs_context"):
+        return "retrieve_context"
+
     return "write_answer"
 
 
@@ -136,9 +144,51 @@ def fetch_news(state: MarketResearchState) -> dict:
 
 
 def route_after_news(state: MarketResearchState) -> str:
-    """Choose whether a news request also needs a cost calculation."""
+    """Choose whether news should be followed by cost or context retrieval."""
     if state.get("shares") is not None:
         return "calculate_cost"
+
+    if state.get("needs_context"):
+        return "retrieve_context"
+
+    return "write_answer"
+
+
+def retrieve_context(state: MarketResearchState) -> dict:
+    """Retrieve relevant reference-document chunks for the user's question."""
+    try:
+        documents = search_knowledge(state["question"])
+    except Exception as exc:
+        errors = [
+            *state.get("errors", []),
+            f"Could not retrieve reference context: {exc}",
+        ]
+        return {
+            **_complete(state, "retrieve_context"),
+            "context": [],
+            "context_status": "error",
+            "errors": errors,
+        }
+
+    context = [
+        {
+            "content": document.page_content,
+            "source": document.metadata.get("source", "Unknown source"),
+            "metadata": document.metadata,
+        }
+        for document in documents
+    ]
+    return {
+        **_complete(state, "retrieve_context"),
+        "context": context,
+        "context_status": "ok" if context else "no_results",
+    }
+
+
+def route_after_calculation(state: MarketResearchState) -> str:
+    """Choose whether cost calculation should be followed by context retrieval."""
+    if state.get("needs_context"):
+        return "retrieve_context"
 
     return "write_answer"
 
@@ -232,6 +282,7 @@ def build_graph():
     workflow.add_node("parse_request", parse_request)
     workflow.add_node("fetch_quote", fetch_quote)
     workflow.add_node("fetch_news", fetch_news)
+    workflow.add_node("retrieve_context", retrieve_context)
     workflow.add_node("calculate_cost", calculate_cost)
     workflow.add_node("write_answer", write_answer)
     workflow.add_node("write_partial_answer", lambda state: {
@@ -254,6 +305,7 @@ def build_graph():
         {
             "fetch_quote": "fetch_quote",
             "fetch_news": "fetch_news",
+            "retrieve_context": "retrieve_context",
             "write_answer": "write_answer",
             "partial_answer": "write_partial_answer",
         },
@@ -264,6 +316,7 @@ def build_graph():
         {
             "fetch_news": "fetch_news",
             "calculate_cost": "calculate_cost",
+            "retrieve_context": "retrieve_context",
             "write_answer": "write_answer",
             "partial_answer": "write_partial_answer",
         },
@@ -273,10 +326,19 @@ def build_graph():
         route_after_news,
         {
             "calculate_cost": "calculate_cost",
+            "retrieve_context": "retrieve_context",
             "write_answer": "write_answer",
         },
     )
-    workflow.add_edge("calculate_cost", "write_answer")
+    workflow.add_conditional_edges(
+        "calculate_cost",
+        route_after_calculation,
+        {
+            "retrieve_context": "retrieve_context",
+            "write_answer": "write_answer",
+        },
+    )
+    workflow.add_edge("retrieve_context", "write_answer")
     workflow.add_edge("write_answer", END)
     workflow.add_edge("write_partial_answer", END)
 

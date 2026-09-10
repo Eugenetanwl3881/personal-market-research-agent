@@ -8,6 +8,7 @@ A command-line application for sourced, informational equity-market research. It
 - Interprets one or more ticker symbols and an optional share quantity from a natural-language question.
 - Retrieves the latest available closing price from Yahoo Finance through `yfinance`.
 - Searches finance news through Tavily, preferring the past day and falling back to the past week when results are sparse.
+- Retrieves relevant stable reference context from the local RAG knowledge base when a question asks for company or industry background.
 - Calculates share costs deterministically in Python.
 - Labels price type, trading date, retrieval time, source, and freshness.
 - Separates verified quote data from reported news and model-written summaries.
@@ -26,7 +27,15 @@ scope check → structured parsing → quote/news retrieval → calculation → 
 terminal progress updates + streamed answer text
 ```
 
-The graph coordinates the work. External retrieval and arithmetic remain ordinary Python functions, independent of the language model.
+The graph coordinates the work. External retrieval, RAG retrieval, and arithmetic remain ordinary Python functions, independent of the language model.
+
+The current RAG path is a predictable two-step flow:
+
+```text
+Question → retrieve relevant reference chunks → grounded answer
+```
+
+The initial knowledge base is stored in `knowledge/` as Markdown. The retriever uses local embeddings and an in-memory vector store; the index is rebuilt when the process starts.
 
 ```mermaid
 flowchart TD
@@ -56,6 +65,8 @@ flowchart TD
 - Python 3.11+
 - LangGraph
 - LangChain Core and `langchain-openai`
+- `langchain-text-splitters` and `langchain-huggingface`
+- `sentence-transformers` for local document embeddings
 - An OpenAI-compatible model endpoint (currently configured for OpenCode Go)
 - `yfinance`
 - Tavily
@@ -104,6 +115,7 @@ Python renders predictable, data-sensitive sections:
 - Quotes
 - Estimated share cost, when shares are requested
 - Recent news and source links
+- Reference sources, when RAG context is used
 - Data limitations
 - Disclaimer
 
@@ -123,5 +135,7 @@ External services are mocked in the normal tests, so they are fast, deterministi
 
 - Prices are latest available closes, not guaranteed live prices.
 - Yahoo Finance and Tavily data can be delayed, incomplete, or unavailable.
+- The initial RAG corpus is small and local; its vector index is not yet persisted.
+- The RAG retriever currently uses Markdown documents; PDF and automated document ingestion are future work.
 - The first version has no portfolios, trade execution, database, dashboard, or conversation memory.
 - The assistant does not provide personalized buy/sell recommendations. (YET)

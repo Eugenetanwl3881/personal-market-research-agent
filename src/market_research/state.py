@@ -8,9 +8,12 @@ class MarketResearchState(TypedDict, total=False):
     shares: int | None
     needs_quote: bool
     needs_news: bool
+    needs_context: bool
     quote: dict[str, Any]
     news: list[dict[str, Any]]
     news_status: str
+    context: list[dict[str, Any]]
+    context_status: str
     calculation: str
     errors: list[str]
     final_answer: str

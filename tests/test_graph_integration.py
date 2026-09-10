@@ -1,4 +1,5 @@
 import market_research.graph as graph_module
+from langchain_core.documents import Document
 
 
 def configure_graph_dependencies(monkeypatch, parsed_request, answer="Mock final answer"):
@@ -161,6 +162,59 @@ def test_multiple_tickers_return_multiple_quotes(monkeypatch):
     result = graph_module.build_graph().invoke({"question": "Compare AAPL and MSFT prices."})
 
     assert set(result["quote"]) == {"AAPL", "MSFT"}
+
+
+def test_reference_context_is_retrieved_before_answer(monkeypatch):
+    configure_graph_dependencies(monkeypatch, {
+        "intent": "quote",
+        "ticker": ["AAPL"],
+        "shares": None,
+        "needs_quote": True,
+        "needs_news": False,
+        "needs_context": True,
+    })
+    monkeypatch.setattr(graph_module, "get_stock_quote", quote)
+    monkeypatch.setattr(
+        graph_module,
+        "search_knowledge",
+        lambda question: [Document(
+            page_content="Apple operates across hardware, software, and services.",
+            metadata={"source": "apple.md", "document_type": "markdown"},
+        )],
+    )
+
+    result = graph_module.build_graph().invoke({
+        "question": "What are Apple's major business areas and its price?"
+    })
+
+    assert result["context_status"] == "ok"
+    assert result["context"][0]["source"] == "apple.md"
+    assert "retrieve_context completed" in result["steps"]
+
+
+def test_reference_context_failure_preserves_quote(monkeypatch):
+    configure_graph_dependencies(monkeypatch, {
+        "intent": "quote",
+        "ticker": ["AAPL"],
+        "shares": None,
+        "needs_quote": True,
+        "needs_news": False,
+        "needs_context": True,
+    })
+    monkeypatch.setattr(graph_module, "get_stock_quote", quote)
+    monkeypatch.setattr(
+        graph_module,
+        "search_knowledge",
+        lambda question: (_ for _ in ()).throw(RuntimeError("Retriever unavailable.")),
+    )
+
+    result = graph_module.build_graph().invoke({
+        "question": "What are Apple's major business areas and its price?"
+    })
+
+    assert result["context_status"] == "error"
+    assert result["quote"]["AAPL"]["price"] == 100.0
+    assert "Retriever unavailable." in result["errors"][-1]
 
 
 def test_refused_advice_request_does_not_call_external_dependencies(monkeypatch):

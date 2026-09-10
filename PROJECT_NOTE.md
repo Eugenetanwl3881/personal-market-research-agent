@@ -10,6 +10,8 @@
 - Latest available closing prices, with source, trading date, retrieval time, and freshness classification.
 - Share-cost calculations for a supplied positive quantity.
 - Recent finance-news retrieval with structured source information.
+- Two-step RAG retrieval over a small local Markdown knowledge base.
+- Reference-source labels and grounded reference evidence in answer generation.
 - Scope guardrails for trade execution, unrelated questions, and personalized investment advice.
 - Partial answers when parsing, quote retrieval, news retrieval, or model generation fails.
 - Graph-step streaming and hybrid answer streaming in the command-line interface.
@@ -22,6 +24,7 @@ Deferred: portfolios, trading, databases, dashboards, and conversation memory.
 - Python 3.11+
 - LangGraph
 - LangChain Core and `langchain-openai`
+- `langchain-text-splitters`, `langchain-huggingface`, and `sentence-transformers`
 - OpenAI-compatible model endpoint
 - `yfinance`
 - Tavily
@@ -46,8 +49,12 @@ flowchart TD
     Q -->|otherwise| A
 
     N -->|shares supplied| C
+    N -->|needs context| R[retrieve_context]
     N -->|otherwise| A
-    C --> A
+    C -->|needs context| R
+    C -->|otherwise| A
+    Q -->|needs context| R
+    R --> A
     PA --> END2([END])
     A --> END3([END])
 ```
@@ -63,9 +70,12 @@ ticker
 shares
 needs_quote
 needs_news
+needs_context
 quote
 news
 news_status
+context
+context_status
 calculation
 errors
 final_answer
@@ -82,8 +92,9 @@ steps
 | `parser.py` | Structured LLM parsing plus deterministic validation. |
 | `data.py` | Quote/news retrieval, timestamps, freshness, and source normalization. |
 | `calculations.py` | Exact share-cost arithmetic and input validation. |
-| `graph.py` | Nodes, state updates, conditional routing, and partial-answer fallbacks. |
-| `answer.py` | Trusted section formatting, grounded prompts, prompt-injection defense, and narrative streaming. |
+| `graph.py` | Nodes, state updates, conditional routing, RAG retrieval, and partial-answer fallbacks. |
+| `rag.py` | Markdown loading, chunking, local embeddings, vector storage, and similarity retrieval. |
+| `answer.py` | Trusted section formatting, quote/news/reference grounding, prompt-injection defense, and narrative streaming. |
 | `cli.py` | User input, graph execution, and terminal output. |
 
 ## Trust model

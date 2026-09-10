@@ -12,6 +12,7 @@ class MarketRequest(BaseModel):
     shares: int | None = None
     needs_quote: bool = False
     needs_news: bool = False
+    needs_context: bool = False
 
 
 def _validate_request(request: MarketRequest) -> dict:
@@ -35,6 +36,7 @@ def _validate_request(request: MarketRequest) -> dict:
         "shares": shares,
         "needs_quote": request.needs_quote,
         "needs_news": request.needs_news,
+        "needs_context": request.needs_context,
     }
 
 
@@ -55,6 +57,22 @@ def _fallback_parse(question: str) -> dict:
         shares=shares,
         needs_quote=True,
         needs_news="news" in question.lower(),
+        needs_context=any(
+            term in question.lower()
+            for term in (
+                "business",
+                "segment",
+                "industry",
+                "product",
+                "service",
+                "revenue",
+                "fundamental",
+                "financial",
+                "annual report",
+                "10-k",
+                "10-q",
+            )
+        ),
     ))
 
 
@@ -72,6 +90,10 @@ def parse_market_request(question: str, model: Any | None = None) -> dict:
 
 Return only the requested schema. Use uppercase exchange tickers when present.
 Set needs_quote for price or cost requests. Set needs_news for recent-news requests.
+Set needs_context for stable company, industry, business-segment, product, or
+financial-background questions that can be answered from reference documents.
+Keep needs_context false for quote, cost, or recent-news questions that do not
+ask for background information.
 Use quote_and_cost when a positive share quantity is requested.
 
 User question:
