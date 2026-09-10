@@ -82,7 +82,7 @@ final_answer
 steps
 ```
 
-`quote` holds one structured quote per ticker. Each quote includes price, currency, price type, trading date, retrieval time, freshness status, and source. `news` contains structured article fields: title, publisher, publication timestamp, URL, and content excerpt.
+`quote` holds one structured quote per ticker. Each quote includes price, currency, price type, trading date, retrieval time, freshness status, and source. `news` contains structured article fields: title, publisher, publication timestamp, URL, and content excerpt. RAG context is limited to the highest-scoring chunks that pass the configured relevance threshold; each chunk retains its retrieval score in metadata.
 
 ## Component responsibilities
 

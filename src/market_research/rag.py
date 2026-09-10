@@ -6,6 +6,7 @@ from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+from langchain_core.retrievers import BaseRetriever
 from langchain_core.vectorstores import InMemoryVectorStore
 
 
@@ -13,6 +14,38 @@ DEFAULT_KNOWLEDGE_DIR = (
     Path(__file__).resolve().parents[2] / "knowledge"
 )
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_RETRIEVAL_K = 2
+DEFAULT_RELEVANCE_THRESHOLD = 0.45
+
+
+class ScoreThresholdRetriever(BaseRetriever):
+    """Retrieve only top-ranked chunks whose cosine score is high enough."""
+
+    vector_store: InMemoryVectorStore
+    k: int = DEFAULT_RETRIEVAL_K
+    score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD
+
+    def _get_relevant_documents(self, query: str) -> list[Document]:
+        """Search the vector store and discard weakly related chunks."""
+        matches = self.vector_store.similarity_search_with_score(query, k=self.k)
+        relevant_documents = []
+
+        for document, score in matches:
+            if score < self.score_threshold:
+                continue
+
+            relevant_documents.append(
+                Document(
+                    id=document.id,
+                    page_content=document.page_content,
+                    metadata={
+                        **document.metadata,
+                        "relevance_score": round(score, 4),
+                    },
+                )
+            )
+
+        return relevant_documents
 
 
 def load_knowledge_documents(
@@ -78,11 +111,14 @@ def build_knowledge_retriever(
     *,
     chunk_size: int = 600,
     chunk_overlap: int = 100,
-    k: int = 4,
+    k: int = DEFAULT_RETRIEVAL_K,
+    score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
 ):
-    """Build an in-memory retriever from the local Markdown knowledge base."""
+    """Build a relevance-filtered retriever from local Markdown documents."""
     if k <= 0:
         raise ValueError("k must be greater than zero.")
+    if not 0 <= score_threshold <= 1:
+        raise ValueError("score_threshold must be between zero and one.")
 
     documents = load_knowledge_documents(knowledge_dir)
     chunks = split_documents(documents, chunk_size, chunk_overlap)
@@ -90,8 +126,11 @@ def build_knowledge_retriever(
         embedding=embeddings or create_embeddings(),
     )
     vector_store.add_documents(chunks)
-    #k=4 means return the four most relevant chunks for each query.
-    return vector_store.as_retriever(search_kwargs={"k": k})
+    return ScoreThresholdRetriever(
+        vector_store=vector_store,
+        k=k,
+        score_threshold=score_threshold,
+    )
 
 
 def search_knowledge(

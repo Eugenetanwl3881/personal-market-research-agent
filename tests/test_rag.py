@@ -73,6 +73,42 @@ def test_search_knowledge_returns_relevant_chunk(tmp_path: Path):
     assert results[0].metadata["source"] == "apple.md"
 
 
+def test_search_knowledge_filters_low_score_chunks(tmp_path: Path):
+    (tmp_path / "apple.md").write_text(
+        "Apple (AAPL) develops hardware and services.", encoding="utf-8"
+    )
+    (tmp_path / "microsoft.md").write_text(
+        "Microsoft (MSFT) develops software and cloud services.", encoding="utf-8"
+    )
+
+    retriever = build_knowledge_retriever(
+        tmp_path,
+        embeddings=KeywordEmbeddings(),
+        chunk_size=200,
+        chunk_overlap=0,
+        k=2,
+    )
+    results = search_knowledge("What does Apple do?", retriever=retriever)
+
+    assert [result.metadata["source"] for result in results] == ["apple.md"]
+    assert results[0].metadata["relevance_score"] == 1.0
+
+
+def test_build_knowledge_retriever_rejects_invalid_score_threshold(tmp_path: Path):
+    (tmp_path / "apple.md").write_text("Apple (AAPL)", encoding="utf-8")
+
+    try:
+        build_knowledge_retriever(
+            tmp_path,
+            embeddings=KeywordEmbeddings(),
+            score_threshold=1.1,
+        )
+    except ValueError as exc:
+        assert str(exc) == "score_threshold must be between zero and one."
+    else:
+        raise AssertionError("Expected invalid score threshold to be rejected")
+
+
 def test_search_knowledge_rejects_empty_questions():
     try:
         search_knowledge("   ", retriever=object())
