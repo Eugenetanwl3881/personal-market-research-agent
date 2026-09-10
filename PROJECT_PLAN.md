@@ -24,8 +24,10 @@
 3. Add PDF and official-filing ingestion with document metadata and page citations.
 4. Add clearer multi-ticker comparison output, including optional calculated differences.
 5. Add retries, timeouts, and observability for external providers.
-6. Add test coverage for CLI presentation and live-stream event ordering.
-7. Add an optional web/API interface after the command-line workflow is stable.
+6. Add optional Hugging Face authentication (`HF_TOKEN`) for higher rate limits
+   and more reliable embedding-model downloads.
+7. Add test coverage for CLI presentation and live-stream event ordering.
+8. Add an optional web/API interface after the command-line workflow is stable.
 
 ## Deferred capabilities
 

@@ -1,10 +1,28 @@
 from types import SimpleNamespace
 
 from market_research.answer import (
+    create_model,
     prepare_news_evidence,
     prepare_reference_evidence,
     write_market_answer,
 )
+
+
+def test_create_model_sends_opencode_session_header(monkeypatch):
+    captured = {}
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
+    monkeypatch.setenv("OPENCODE_SESSION", "conversation-123")
+    monkeypatch.setattr("market_research.answer.ChatOpenAI", FakeChatOpenAI)
+
+    create_model()
+
+    assert captured["default_headers"]["x-opencode-session"] == "conversation-123"
+    assert captured["default_headers"]["User-Agent"] == "market-research-assistant/0.1.0"
 
 
 def test_prepare_news_evidence_limits_untrusted_content():

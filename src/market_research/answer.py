@@ -2,6 +2,7 @@ import json
 import os
 from collections.abc import Callable
 from typing import Any
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -12,6 +13,7 @@ from .state import MarketResearchState
 load_dotenv()
 
 StreamWriter = Callable[[dict[str, str]], None]
+_DEFAULT_OPENCODE_SESSION = str(uuid4())
 
 
 def prepare_news_evidence(
@@ -58,6 +60,11 @@ def create_model() -> ChatOpenAI:
     api_key = os.getenv("OPENCODE_API_KEY")
     base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1")
     model_name = os.getenv("OPENCODE_MODEL", "deepseek-v4-flash")
+    session_id = os.getenv("OPENCODE_SESSION") or _DEFAULT_OPENCODE_SESSION
+    user_agent = os.getenv(
+        "OPENCODE_USER_AGENT",
+        "market-research-assistant/0.1.0",
+    )
 
     if not api_key:
         raise ValueError("OPENCODE_API_KEY is not configured.")
@@ -67,6 +74,10 @@ def create_model() -> ChatOpenAI:
         api_key=api_key,
         base_url=base_url,
         temperature=0,
+        default_headers={
+            "x-opencode-session": session_id,
+            "User-Agent": user_agent,
+        },
     )
 
 

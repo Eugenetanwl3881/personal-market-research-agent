@@ -136,6 +136,8 @@ External services are mocked in the normal tests, so they are fast, deterministi
 - Prices are latest available closes, not guaranteed live prices.
 - Yahoo Finance and Tavily data can be delayed, incomplete, or unavailable.
 - The initial RAG corpus is small and local; its vector index is not yet persisted.
+- Hugging Face authentication is currently optional; configure `HF_TOKEN` later
+  if higher rate limits or more reliable embedding-model downloads are needed.
 - The RAG retriever currently uses Markdown documents; PDF and automated document ingestion are future work.
 - The first version has no portfolios, trade execution, database, dashboard, or conversation memory.
 - The assistant does not provide personalized buy/sell recommendations. (YET)

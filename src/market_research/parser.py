@@ -84,17 +84,44 @@ def parse_market_request(question: str, model: Any | None = None) -> dict:
     if model is None:
         return _fallback_parse(question)
 
-    structured_model = model.with_structured_output(MarketRequest)
+    # OpenCode Go currently accepts JSON-object mode for this model, but its
+    # compatibility layer may reject JSON Schema response formats or forced
+    # tool choices used by other structured-output methods.
+    structured_model = model.with_structured_output(
+        MarketRequest,
+        method="json_mode",
+    )
     request = structured_model.invoke(
         """Extract the stock-market request from the user's question.
 
-Return only the requested schema. Use uppercase exchange tickers when present.
-Set needs_quote for price or cost requests. Set needs_news for recent-news requests.
-Set needs_context for stable company, industry, business-segment, product, or
-financial-background questions that can be answered from reference documents.
-Keep needs_context false for quote, cost, or recent-news questions that do not
-ask for background information.
-Use quote_and_cost when a positive share quantity is requested.
+Return ONLY one valid JSON object with exactly these keys:
+{
+  "intent": "quote",
+  "tickers": ["AAPL"],
+  "shares": null,
+  "needs_quote": true,
+  "needs_news": false,
+  "needs_context": false
+}
+
+Rules:
+- intent must be exactly one of: quote, quote_and_cost, news, comparison.
+- tickers must be an array of uppercase stock-exchange ticker symbols.
+- Resolve a well-known company name to its ticker when the identification is
+  unambiguous, such as Apple -> AAPL or Microsoft -> MSFT. If it is not
+  unambiguous, return an empty tickers array.
+- shares must be a positive integer when the user requests a share quantity;
+  otherwise use null. Do not use zero as a placeholder.
+- Set needs_quote to true for price or share-cost requests.
+- Set needs_news to true for recent-news requests.
+- Set needs_context to true for stable company, industry, business-segment,
+  product, service, revenue, fundamental, financial-background, annual-report,
+  10-K, or 10-Q questions that can be answered from reference documents.
+- Keep needs_context false for quote, cost, or recent-news questions that do
+  not ask for background information.
+- Use quote_and_cost when a positive share quantity is requested.
+- Do not add company names, prices, business segments, notes, explanations,
+  markdown, or any other keys.
 
 User question:
 """ + question
