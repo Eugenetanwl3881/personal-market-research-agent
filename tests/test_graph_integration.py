@@ -174,14 +174,16 @@ def test_reference_context_is_retrieved_before_answer(monkeypatch):
         "needs_context": True,
     })
     monkeypatch.setattr(graph_module, "get_stock_quote", quote)
-    monkeypatch.setattr(
-        graph_module,
-        "search_knowledge",
-        lambda question: [Document(
+    retrieval_options = {}
+
+    def fake_search_knowledge(question, **options):
+        retrieval_options.update(options)
+        return [Document(
             page_content="Apple operates across hardware, software, and services.",
             metadata={"source": "apple.md", "document_type": "markdown"},
-        )],
-    )
+        )]
+
+    monkeypatch.setattr(graph_module, "search_knowledge", fake_search_knowledge)
 
     result = graph_module.build_graph().invoke({
         "question": "What are Apple's major business areas and its price?"
@@ -190,6 +192,7 @@ def test_reference_context_is_retrieved_before_answer(monkeypatch):
     assert result["context_status"] == "ok"
     assert result["context"][0]["source"] == "apple.md"
     assert "retrieve_context completed" in result["steps"]
+    assert retrieval_options["tickers"] == ["AAPL"]
 
 
 def test_reference_context_failure_preserves_quote(monkeypatch):
@@ -205,7 +208,7 @@ def test_reference_context_failure_preserves_quote(monkeypatch):
     monkeypatch.setattr(
         graph_module,
         "search_knowledge",
-        lambda question: (_ for _ in ()).throw(RuntimeError("Retriever unavailable.")),
+        lambda question, **kwargs: (_ for _ in ()).throw(RuntimeError("Retriever unavailable.")),
     )
 
     result = graph_module.build_graph().invoke({

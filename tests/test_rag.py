@@ -39,6 +39,7 @@ def test_load_knowledge_documents_adds_source_metadata(tmp_path: Path):
     assert documents[0].metadata == {
         "source": "apple.md",
         "document_type": "markdown",
+        "ticker": "AAPL",
     }
 
 
@@ -92,6 +93,30 @@ def test_search_knowledge_filters_low_score_chunks(tmp_path: Path):
 
     assert [result.metadata["source"] for result in results] == ["apple.md"]
     assert results[0].metadata["relevance_score"] == 1.0
+
+
+def test_search_knowledge_filters_documents_by_requested_ticker(tmp_path: Path):
+    (tmp_path / "apple.md").write_text(
+        "# Apple\nTicker: AAPL\nApple develops hardware and services.",
+        encoding="utf-8",
+    )
+    (tmp_path / "microsoft.md").write_text(
+        "# Microsoft\nTicker: MSFT\nMicrosoft develops software and cloud services.",
+        encoding="utf-8",
+    )
+
+    retriever = build_knowledge_retriever(
+        tmp_path,
+        embeddings=KeywordEmbeddings(),
+        chunk_size=200,
+        chunk_overlap=0,
+        k=2,
+        score_threshold=0.0,
+        tickers=["aapl"],
+    )
+    results = search_knowledge("What does Apple do?", retriever=retriever)
+
+    assert [result.metadata["source"] for result in results] == ["apple.md"]
 
 
 def test_build_knowledge_retriever_rejects_invalid_score_threshold(tmp_path: Path):

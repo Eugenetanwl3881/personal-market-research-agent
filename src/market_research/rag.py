@@ -1,7 +1,6 @@
-"""Small, standalone retrieval pipeline for the local knowledge base."""
-
-from pathlib import Path
 import os
+import re
+from pathlib import Path
 from typing import Any
 
 from langchain_core.documents import Document
@@ -16,6 +15,7 @@ DEFAULT_KNOWLEDGE_DIR = (
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_RETRIEVAL_K = 2
 DEFAULT_RELEVANCE_THRESHOLD = 0.45
+TICKER_PATTERN = re.compile(r"^\s*Ticker:\s*([A-Za-z]{1,5})\s*$", re.MULTILINE)
 
 
 class ScoreThresholdRetriever(BaseRetriever):
@@ -24,10 +24,23 @@ class ScoreThresholdRetriever(BaseRetriever):
     vector_store: InMemoryVectorStore
     k: int = DEFAULT_RETRIEVAL_K
     score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD
+    tickers: list[str] | None = None
+
+    def _matches_requested_tickers(self, document: Document) -> bool:
+        """Keep requested-company documents and untickered generic documents."""
+        if not self.tickers:
+            return True
+
+        document_ticker = document.metadata.get("ticker")
+        return document_ticker is None or document_ticker in self.tickers
 
     def _get_relevant_documents(self, query: str) -> list[Document]:
         """Search the vector store and discard weakly related chunks."""
-        matches = self.vector_store.similarity_search_with_score(query, k=self.k)
+        matches = self.vector_store.similarity_search_with_score(
+            query,
+            k=self.k,
+            filter=self._matches_requested_tickers,
+        )
         relevant_documents = []
 
         for document, score in matches:
@@ -61,16 +74,20 @@ def load_knowledge_documents(
     if not paths:
         raise FileNotFoundError(f"No Markdown documents found in: {directory}")
 
-    return [
-        Document(
-            page_content=path.read_text(encoding="utf-8"),
-            metadata={
-                "source": path.name,
-                "document_type": "markdown",
-            },
-        )
-        for path in paths
-    ]
+    documents = []
+    for path in paths:
+        content = path.read_text(encoding="utf-8")
+        metadata = {
+            "source": path.name,
+            "document_type": "markdown",
+        }
+        ticker_match = TICKER_PATTERN.search(content)
+        if ticker_match:
+            metadata["ticker"] = ticker_match.group(1).upper()
+
+        documents.append(Document(page_content=content, metadata=metadata))
+
+    return documents
 
 
 def split_documents(
@@ -113,12 +130,19 @@ def build_knowledge_retriever(
     chunk_overlap: int = 100,
     k: int = DEFAULT_RETRIEVAL_K,
     score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
+    tickers: list[str] | None = None,
 ):
     """Build a relevance-filtered retriever from local Markdown documents."""
     if k <= 0:
         raise ValueError("k must be greater than zero.")
     if not 0 <= score_threshold <= 1:
         raise ValueError("score_threshold must be between zero and one.")
+
+    requested_tickers = list(dict.fromkeys(
+        ticker.strip().upper()
+        for ticker in (tickers or [])
+        if ticker.strip()
+    ))
 
     documents = load_knowledge_documents(knowledge_dir)
     chunks = split_documents(documents, chunk_size, chunk_overlap)
@@ -130,6 +154,7 @@ def build_knowledge_retriever(
         vector_store=vector_store,
         k=k,
         score_threshold=score_threshold,
+        tickers=requested_tickers or None,
     )
 
 

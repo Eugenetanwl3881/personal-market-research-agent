@@ -35,7 +35,7 @@ The current RAG path is a predictable two-step flow:
 Question → retrieve relevant reference chunks → grounded answer
 ```
 
-The initial knowledge base is stored in `knowledge/` as Markdown. The retriever uses local embeddings and an in-memory vector store; the index is rebuilt when the process starts. It returns at most the two highest-scoring chunks and filters out chunks below a relevance threshold.
+The initial knowledge base is stored in `knowledge/` as Markdown. The retriever uses local embeddings and an in-memory vector store; the index is rebuilt when the process starts. It returns at most the two highest-scoring chunks, filters out chunks below a relevance threshold, and uses ticker metadata to exclude unrelated company documents while retaining generic untickered documents.
 
 ```mermaid
 flowchart TD

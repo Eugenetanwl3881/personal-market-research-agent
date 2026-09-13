@@ -157,7 +157,10 @@ def route_after_news(state: MarketResearchState) -> str:
 def retrieve_context(state: MarketResearchState) -> dict:
     """Retrieve relevant reference-document chunks for the user's question."""
     try:
-        documents = search_knowledge(state["question"])
+        documents = search_knowledge(
+            state["question"],
+            tickers=state.get("ticker"),
+        )
     except Exception as exc:
         errors = [
             *state.get("errors", []),
