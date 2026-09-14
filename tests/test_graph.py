@@ -11,6 +11,14 @@ def test_parse_routes_missing_ticker_to_partial_answer():
     assert route_after_parse({"intent": "error", "ticker": []}) == "partial_answer"
 
 
+def test_parse_routes_tickerless_context_request_to_retrieval():
+    assert route_after_parse({
+        "intent": "context",
+        "ticker": [],
+        "needs_context": True,
+    }) == "retrieve_context"
+
+
 def test_quote_failure_routes_to_partial_answer():
     assert route_after_quote({"quote": {}, "needs_news": True}) == "partial_answer"
 

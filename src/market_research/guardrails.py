@@ -28,6 +28,28 @@ RESEARCH_TERMS = {
     "company",
 }
 
+REFERENCE_TERMS = {
+    "business",
+    "segment",
+    "segments",
+    "industry",
+    "product",
+    "products",
+    "service",
+    "services",
+    "revenue",
+    "fundamental",
+    "fundamentals",
+    "financial",
+    "methodology",
+    "freshness",
+    "closing price",
+    "data source",
+    "annual report",
+    "10-k",
+    "10-q",
+}
+
 
 def check_scope(question: str) -> tuple[bool, str]:
     """Return whether a question is within the assistant's scope."""
@@ -42,7 +64,10 @@ def check_scope(question: str) -> tuple[bool, str]:
     if any(term in normalized for term in ADVICE_TERMS):
         return False, "I can provide market information, but not personalized investment advice."
 
-    if not any(term in normalized for term in RESEARCH_TERMS):
-        return False, "I can only help with stock prices, share calculations, and recent market news."
+    if not any(term in normalized for term in RESEARCH_TERMS | REFERENCE_TERMS):
+        return False, (
+            "I can only help with stock prices, share calculations, recent market "
+            "news, and related company or market-research background."
+        )
 
     return True, "" 

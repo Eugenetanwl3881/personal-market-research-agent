@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 class MarketRequest(BaseModel):
     """Validated structured interpretation of a market-research question."""
 
-    intent: Literal["quote", "quote_and_cost", "news", "comparison"]
+    intent: Literal["quote", "quote_and_cost", "news", "comparison", "context"]
     tickers: list[str] = Field(default_factory=list)
     shares: int | None = None
     needs_quote: bool = False
@@ -19,8 +19,14 @@ def _validate_request(request: MarketRequest) -> dict:
     """Apply deterministic checks after structured model extraction."""
     tickers = list(dict.fromkeys(ticker.strip().upper() for ticker in request.tickers))
 
-    if not tickers:
-        raise ValueError("No stock ticker was found in the question.")
+    if not tickers and request.intent != "context":
+        raise ValueError(
+            "No stock ticker was found in the question. "
+            "A ticker is required for quote or news requests."
+        )
+
+    if not tickers and (request.needs_quote or request.needs_news):
+        raise ValueError("A stock ticker is required for quote or news requests.")
 
     shares = request.shares
     if shares == 0 and request.intent != "quote_and_cost":
@@ -45,34 +51,45 @@ def _fallback_parse(question: str) -> dict:
     common_words = {
         "WHAT", "IS", "THE", "PRICE", "OF", "HOW", "MUCH", "WOULD",
         "SHARES", "COST", "LATEST", "NEWS", "ABOUT", "AND", "COMPARE",
+        "QUOTE", "FRESHNESS", "METHODOLOGY", "BUSINESS", "SEGMENT",
+        "SEGMENTS", "INDUSTRY", "PRODUCT", "PRODUCTS", "SERVICE", "SERVICES",
+        "REVENUE", "FUNDAMENTAL", "FUNDAMENTALS", "FINANCIAL", "ANNUAL", "REPORT",
+        "MAJOR",
     }
     words = re.findall(r"\b[A-Z]{1,5}\b", question.upper())
     tickers = [word for word in words if word not in common_words]
     share_match = re.search(r"\b(\d+)\s+shares?\b", question.lower())
     shares = int(share_match.group(1)) if share_match else None
-    intent = "quote_and_cost" if shares is not None else "quote"
+    context_terms = (
+        "business",
+        "segment",
+        "industry",
+        "product",
+        "service",
+        "revenue",
+        "fundamental",
+        "financial",
+        "methodology",
+        "freshness",
+        "annual report",
+        "10-k",
+        "10-q",
+    )
+    needs_context = any(term in question.lower() for term in context_terms)
+    intent = (
+        "context"
+        if needs_context and not tickers and shares is None
+        else "quote_and_cost"
+        if shares is not None
+        else "quote"
+    )
     return _validate_request(MarketRequest(
         intent=intent,
         tickers=tickers,
         shares=shares,
-        needs_quote=True,
+        needs_quote=intent != "context",
         needs_news="news" in question.lower(),
-        needs_context=any(
-            term in question.lower()
-            for term in (
-                "business",
-                "segment",
-                "industry",
-                "product",
-                "service",
-                "revenue",
-                "fundamental",
-                "financial",
-                "annual report",
-                "10-k",
-                "10-q",
-            )
-        ),
+        needs_context=needs_context,
     ))
 
 
@@ -105,7 +122,7 @@ Return ONLY one valid JSON object with exactly these keys:
 }
 
 Rules:
-- intent must be exactly one of: quote, quote_and_cost, news, comparison.
+- intent must be exactly one of: quote, quote_and_cost, news, comparison, context.
 - tickers must be an array of uppercase stock-exchange ticker symbols.
 - Resolve a well-known company name to its ticker when the identification is
   unambiguous, such as Apple -> AAPL or Microsoft -> MSFT. If it is not
@@ -119,6 +136,9 @@ Rules:
   10-K, or 10-Q questions that can be answered from reference documents.
 - Keep needs_context false for quote, cost, or recent-news questions that do
   not ask for background information.
+- Use context for stable background or methodology questions that do not
+  require a ticker. Quote, quote_and_cost, news, and comparison requests must
+  include at least one ticker.
 - Use quote_and_cost when a positive share quantity is requested.
 - Do not add company names, prices, business segments, notes, explanations,
   markdown, or any other keys.

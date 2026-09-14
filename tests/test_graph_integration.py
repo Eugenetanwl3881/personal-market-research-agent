@@ -195,6 +195,35 @@ def test_reference_context_is_retrieved_before_answer(monkeypatch):
     assert retrieval_options["tickers"] == ["AAPL"]
 
 
+def test_tickerless_context_request_retrieves_reference_documents(monkeypatch):
+    configure_graph_dependencies(monkeypatch, {
+        "intent": "context",
+        "ticker": [],
+        "shares": None,
+        "needs_quote": False,
+        "needs_news": False,
+        "needs_context": True,
+    })
+    retrieval_options = {}
+
+    def fake_search_knowledge(question, **options):
+        retrieval_options.update(options)
+        return [Document(
+            page_content="A closing price is not necessarily a live price.",
+            metadata={"source": "methodology.md", "document_type": "markdown"},
+        )]
+
+    monkeypatch.setattr(graph_module, "search_knowledge", fake_search_knowledge)
+
+    result = graph_module.build_graph().invoke({
+        "question": "What is the quote freshness methodology?"
+    })
+
+    assert result["context_status"] == "ok"
+    assert result["context"][0]["source"] == "methodology.md"
+    assert retrieval_options["tickers"] == []
+
+
 def test_reference_context_failure_preserves_quote(monkeypatch):
     configure_graph_dependencies(monkeypatch, {
         "intent": "quote",

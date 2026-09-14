@@ -158,3 +158,27 @@ def test_reference_context_is_included_and_cited_as_a_source(monkeypatch):
     assert "hardware, software, and services" in prompts[0]
     assert "## Reference sources" in answer
     assert "- apple.md" in answer
+
+
+def test_context_only_answer_omits_unrequested_market_sections(monkeypatch):
+    class FakeModel:
+        def stream(self, prompt):
+            yield SimpleNamespace(content="The methodology explains quote freshness.")
+
+    monkeypatch.setattr("market_research.answer.create_model", lambda: FakeModel())
+
+    answer = write_market_answer({
+        "question": "What is the quote freshness methodology?",
+        "needs_context": True,
+        "context": [{
+            "source": "methodology.md",
+            "metadata": {"document_type": "markdown"},
+            "content": "A closing price is not necessarily a live price.",
+        }],
+        "context_status": "ok",
+    })
+
+    assert "## Quotes" not in answer
+    assert "## Recent news" not in answer
+    assert "## Reference sources" in answer
+    assert "Reference context reflects the configured knowledge base." in answer

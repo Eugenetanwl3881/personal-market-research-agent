@@ -9,6 +9,8 @@ from market_research.guardrails import check_scope
         "What is the price of AAPL?",
         "How much would 15 shares of MSFT cost?",
         "What is the latest news about Nvidia?",
+        "What are Microsoft's major business segments?",
+        "What is the quote freshness methodology?",
     ],
 )
 def test_market_research_questions_are_accepted(question):

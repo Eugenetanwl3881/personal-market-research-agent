@@ -66,7 +66,10 @@ def parse_request(state: MarketResearchState) -> dict:
 
 def route_after_parse(state: MarketResearchState) -> str:
     """Choose the first data step required by the parsed request."""
-    if not state.get("ticker") or state.get("intent") == "error":
+    if state.get("intent") == "error":
+        return "partial_answer"
+
+    if not state.get("ticker") and not state.get("needs_context"):
         return "partial_answer"
 
     if state.get("needs_quote"):

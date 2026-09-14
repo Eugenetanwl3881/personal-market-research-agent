@@ -91,3 +91,38 @@ def test_structured_parser_rejects_invalid_share_quantity():
         assert str(exc) == "Shares must be greater than zero."
     else:
         raise AssertionError("Expected invalid share quantity to be rejected")
+
+
+def test_structured_parser_allows_tickerless_context_request():
+    model = FakeStructuredModel(
+        {
+            "intent": "context",
+            "tickers": [],
+            "shares": None,
+            "needs_quote": False,
+            "needs_news": False,
+            "needs_context": True,
+        }
+    )
+
+    result = parse_market_request(
+        "What is the quote freshness methodology?",
+        model=model,
+    )
+
+    assert result == {
+        "intent": "context",
+        "ticker": [],
+        "shares": None,
+        "needs_quote": False,
+        "needs_news": False,
+        "needs_context": True,
+    }
+
+
+def test_fallback_parser_allows_tickerless_context_request():
+    result = parse_market_request("What is the quote freshness methodology?")
+
+    assert result["intent"] == "context"
+    assert result["ticker"] == []
+    assert result["needs_context"] is True

@@ -38,7 +38,7 @@ flowchart TD
     S -->|refused| END1([END])
     S -->|accepted| P[parse_request]
 
-    P -->|parse failure / no ticker| PA[write_partial_answer]
+    P -->|parse failure / missing ticker for quote or news| PA[write_partial_answer]
     P -->|needs quote| Q[fetch_quote]
     P -->|news only| N[fetch_news]
     P -->|no data retrieval| A[write_answer]

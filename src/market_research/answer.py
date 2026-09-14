@@ -222,16 +222,27 @@ def _format_limitations(state: MarketResearchState) -> list[str]:
         limitations.append("- Reference-document retrieval failed; background context may be incomplete.")
 
     limitations.extend(f"- {error}" for error in state.get("errors", []))
-    return limitations or ["- Quote data may be delayed and news reflects retrieved sources."]
+    if limitations:
+        return limitations
+
+    if state.get("quote") or state.get("needs_quote"):
+        limitations.append("- Quote data may be delayed.")
+    if state.get("news") or state.get("needs_news"):
+        limitations.append("- News reflects retrieved sources.")
+
+    return limitations or ["- Reference context reflects the configured knowledge base."]
 
 
 def _static_sections_before_news(state: MarketResearchState, summary: str) -> str:
     sections = [
         "## Summary",
         summary,
-        "## Quotes",
-        "\n".join(_format_quotes(state.get("quote", {}))),
     ]
+    if state.get("needs_quote") or state.get("quote"):
+        sections.extend([
+            "## Quotes",
+            "\n".join(_format_quotes(state.get("quote", {}))),
+        ])
     if state.get("shares") is not None:
         sections.extend([
             "## Estimated share cost",
@@ -277,22 +288,24 @@ def write_market_answer(
     if stream_writer and static_after_summary:
         stream_writer({"type": "answer_section", "text": static_after_summary})
 
-    news_evidence = prepare_news_evidence(state.get("news", []))
-    if stream_writer:
-        stream_writer({"type": "answer_section", "text": "\n\n## Recent news\n\n"})
-    news_narrative = (
-        _stream_model_text(_news_prompt(news_evidence), stream_writer)
-        if news_evidence
-        else "- No recent news data was available."
-    )
+    news_section = ""
+    if state.get("needs_news") or state.get("news"):
+        news_evidence = prepare_news_evidence(state.get("news", []))
+        if stream_writer:
+            stream_writer({"type": "answer_section", "text": "\n\n## Recent news\n\n"})
+        news_narrative = (
+            _stream_model_text(_news_prompt(news_evidence), stream_writer)
+            if news_evidence
+            else "- No recent news data was available."
+        )
+        news_section = "\n\n".join(["## Recent news", news_narrative])
 
     after_news = _static_sections_after_news(state)
     if stream_writer:
         stream_writer({"type": "answer_section", "text": "\n\n" + after_news + "\n"})
 
-    return "\n\n".join([
-        before_news,
-        "## Recent news",
-        news_narrative,
-        after_news,
-    ])
+    sections = [before_news]
+    if news_section:
+        sections.append(news_section)
+    sections.append(after_news)
+    return "\n\n".join(sections)
