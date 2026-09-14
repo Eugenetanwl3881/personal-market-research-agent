@@ -35,7 +35,18 @@ The current RAG path is a predictable two-step flow:
 Question → retrieve relevant reference chunks → grounded answer
 ```
 
-The initial knowledge base is stored in `knowledge/` as Markdown. The retriever uses local embeddings and an in-memory vector store; the index is rebuilt when the process starts. It returns at most the two highest-scoring chunks, filters out chunks below a relevance threshold, and uses ticker metadata to exclude unrelated company documents while retaining generic untickered documents.
+The initial knowledge base is stored in `knowledge/` as Markdown with YAML frontmatter metadata. The retriever uses local embeddings and an in-memory vector store; the index is rebuilt when the process starts. It returns at most the two highest-scoring chunks, filters out chunks below a relevance threshold, and uses ticker metadata to exclude unrelated company documents while retaining generic untickered documents.
+
+Company documents declare metadata explicitly:
+
+```yaml
+---
+ticker: AAPL
+company: Apple Inc.
+document_type: company_overview
+source_url: https://investor.apple.com/
+---
+```
 
 ```mermaid
 flowchart TD
@@ -67,6 +78,7 @@ flowchart TD
 - LangChain Core and `langchain-openai`
 - `langchain-text-splitters` and `langchain-huggingface`
 - `sentence-transformers` for local document embeddings
+- `PyYAML` for knowledge-document frontmatter
 - An OpenAI-compatible model endpoint (currently configured for OpenCode Go)
 - `yfinance`
 - Tavily

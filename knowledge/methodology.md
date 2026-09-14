@@ -1,3 +1,8 @@
+---
+document_type: methodology
+source_name: Internal project methodology
+---
+
 # Market Research Methodology
 
 The application uses Yahoo Finance for the latest available closing price.
@@ -11,5 +16,3 @@ total cost = price × number of shares
 
 Market data may be delayed or incomplete. The application provides
 informational market research and does not provide personalized investment advice.
-
-Source: Internal project methodology

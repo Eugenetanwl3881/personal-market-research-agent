@@ -29,17 +29,41 @@ class KeywordEmbeddings(Embeddings):
         return self._embed(text)
 
 
+def write_company_document(path: Path, ticker: str, company: str, body: str):
+    path.write_text(
+        f"---\n"
+        f"ticker: {ticker}\n"
+        f"company: {company}\n"
+        f"document_type: company_overview\n"
+        f"source_url: https://example.com/{ticker.lower()}\n"
+        f"---\n\n"
+        f"{body}",
+        encoding="utf-8",
+    )
+
+
 def test_load_knowledge_documents_adds_source_metadata(tmp_path: Path):
-    (tmp_path / "apple.md").write_text("# Apple\nTicker: AAPL", encoding="utf-8")
+    (tmp_path / "apple.md").write_text(
+        "---\n"
+        "ticker: AAPL\n"
+        "company: Apple Inc.\n"
+        "document_type: company_overview\n"
+        "source_url: https://investor.apple.com/\n"
+        "---\n\n"
+        "# Apple\nApple develops hardware and services.",
+        encoding="utf-8",
+    )
 
     documents = load_knowledge_documents(tmp_path)
 
     assert len(documents) == 1
-    assert documents[0].page_content == "# Apple\nTicker: AAPL"
+    assert documents[0].page_content == "# Apple\nApple develops hardware and services."
     assert documents[0].metadata == {
         "source": "apple.md",
-        "document_type": "markdown",
         "ticker": "AAPL",
+        "company": "Apple Inc.",
+        "document_type": "company_overview",
+        "source_url": "https://investor.apple.com/",
     }
 
 
@@ -54,11 +78,17 @@ def test_split_documents_preserves_metadata_and_creates_chunks():
 
 
 def test_search_knowledge_returns_relevant_chunk(tmp_path: Path):
-    (tmp_path / "apple.md").write_text(
-        "Apple (AAPL) develops hardware and services.", encoding="utf-8"
+    write_company_document(
+        tmp_path / "apple.md",
+        "AAPL",
+        "Apple Inc.",
+        "Apple develops hardware and services.",
     )
-    (tmp_path / "microsoft.md").write_text(
-        "Microsoft (MSFT) develops software and cloud services.", encoding="utf-8"
+    write_company_document(
+        tmp_path / "microsoft.md",
+        "MSFT",
+        "Microsoft Corporation",
+        "Microsoft develops software and cloud services.",
     )
 
     retriever = build_knowledge_retriever(
@@ -75,11 +105,17 @@ def test_search_knowledge_returns_relevant_chunk(tmp_path: Path):
 
 
 def test_search_knowledge_filters_low_score_chunks(tmp_path: Path):
-    (tmp_path / "apple.md").write_text(
-        "Apple (AAPL) develops hardware and services.", encoding="utf-8"
+    write_company_document(
+        tmp_path / "apple.md",
+        "AAPL",
+        "Apple Inc.",
+        "Apple develops hardware and services.",
     )
-    (tmp_path / "microsoft.md").write_text(
-        "Microsoft (MSFT) develops software and cloud services.", encoding="utf-8"
+    write_company_document(
+        tmp_path / "microsoft.md",
+        "MSFT",
+        "Microsoft Corporation",
+        "Microsoft develops software and cloud services.",
     )
 
     retriever = build_knowledge_retriever(
@@ -96,13 +132,17 @@ def test_search_knowledge_filters_low_score_chunks(tmp_path: Path):
 
 
 def test_search_knowledge_filters_documents_by_requested_ticker(tmp_path: Path):
-    (tmp_path / "apple.md").write_text(
-        "# Apple\nTicker: AAPL\nApple develops hardware and services.",
-        encoding="utf-8",
+    write_company_document(
+        tmp_path / "apple.md",
+        "AAPL",
+        "Apple Inc.",
+        "Apple develops hardware and services.",
     )
-    (tmp_path / "microsoft.md").write_text(
-        "# Microsoft\nTicker: MSFT\nMicrosoft develops software and cloud services.",
-        encoding="utf-8",
+    write_company_document(
+        tmp_path / "microsoft.md",
+        "MSFT",
+        "Microsoft Corporation",
+        "Microsoft develops software and cloud services.",
     )
 
     retriever = build_knowledge_retriever(
@@ -120,7 +160,12 @@ def test_search_knowledge_filters_documents_by_requested_ticker(tmp_path: Path):
 
 
 def test_build_knowledge_retriever_rejects_invalid_score_threshold(tmp_path: Path):
-    (tmp_path / "apple.md").write_text("Apple (AAPL)", encoding="utf-8")
+    write_company_document(
+        tmp_path / "apple.md",
+        "AAPL",
+        "Apple Inc.",
+        "Apple develops hardware and services.",
+    )
 
     try:
         build_knowledge_retriever(

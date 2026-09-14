@@ -7,6 +7,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.vectorstores import InMemoryVectorStore
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 DEFAULT_KNOWLEDGE_DIR = (
@@ -15,7 +16,29 @@ DEFAULT_KNOWLEDGE_DIR = (
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_RETRIEVAL_K = 2
 DEFAULT_RELEVANCE_THRESHOLD = 0.45
-TICKER_PATTERN = re.compile(r"^\s*Ticker:\s*([A-Za-z]{1,5})\s*$", re.MULTILINE)
+
+
+class KnowledgeDocumentMetadata(BaseModel):
+    """Validated metadata declared in a knowledge document's frontmatter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticker: str | None = None
+    company: str | None = None
+    document_type: str
+    source_url: str | None = None
+    source_name: str | None = None
+
+    @field_validator("ticker")
+    @classmethod
+    def normalize_ticker(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        normalized = value.strip().upper()
+        if not re.fullmatch(r"[A-Z]{1,5}", normalized):
+            raise ValueError("ticker must contain one to five letters.")
+        return normalized
 
 
 class ScoreThresholdRetriever(BaseRetriever):
@@ -61,10 +84,46 @@ class ScoreThresholdRetriever(BaseRetriever):
         return relevant_documents
 
 
+def _parse_markdown_frontmatter(
+    content: str,
+    source_name: str,
+) -> tuple[dict[str, Any], str]:
+    """Parse and validate YAML frontmatter, returning metadata and document body."""
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise ValueError(
+            f"Knowledge document must begin with YAML frontmatter: {source_name}"
+        )
+
+    closing_index = next(
+        (index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"),
+        None,
+    )
+    if closing_index is None:
+        raise ValueError(
+            f"Knowledge document frontmatter is not closed: {source_name}"
+        )
+
+    import yaml
+
+    raw_metadata = yaml.safe_load("".join(lines[1:closing_index])) or {}
+    if not isinstance(raw_metadata, dict):
+        raise ValueError(
+            f"Knowledge document metadata must be a mapping: {source_name}"
+        )
+
+    metadata = KnowledgeDocumentMetadata.model_validate(raw_metadata)
+    document_metadata = metadata.model_dump(exclude_none=True)
+    document_metadata["source"] = source_name
+
+    body = "".join(lines[closing_index + 1:]).lstrip()
+    return document_metadata, body
+
+
 def load_knowledge_documents(
     knowledge_dir: str | Path | None = None,
 ) -> list[Document]:
-    """Load Markdown files as LangChain documents with stable source metadata."""
+    """Load Markdown files with validated YAML frontmatter metadata."""
     directory = Path(knowledge_dir) if knowledge_dir else DEFAULT_KNOWLEDGE_DIR
 
     if not directory.exists():
@@ -77,15 +136,8 @@ def load_knowledge_documents(
     documents = []
     for path in paths:
         content = path.read_text(encoding="utf-8")
-        metadata = {
-            "source": path.name,
-            "document_type": "markdown",
-        }
-        ticker_match = TICKER_PATTERN.search(content)
-        if ticker_match:
-            metadata["ticker"] = ticker_match.group(1).upper()
-
-        documents.append(Document(page_content=content, metadata=metadata))
+        metadata, body = _parse_markdown_frontmatter(content, path.name)
+        documents.append(Document(page_content=body, metadata=metadata))
 
     return documents
 

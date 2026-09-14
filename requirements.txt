@@ -4,6 +4,7 @@ langchain-openai
 langchain-text-splitters
 langchain-huggingface
 sentence-transformers
+pyyaml
 yfinance
 tavily-python
 python-dotenv
