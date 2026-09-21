@@ -29,6 +29,22 @@ class KeywordEmbeddings(Embeddings):
         return self._embed(text)
 
 
+class CountingEmbeddings(KeywordEmbeddings):
+    """Keyword embeddings that record document-embedding work."""
+
+    def __init__(self):
+        self.document_calls = 0
+        self.query_calls = 0
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.document_calls += 1
+        return super().embed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        self.query_calls += 1
+        return super().embed_query(text)
+
+
 def write_company_document(path: Path, ticker: str, company: str, body: str):
     path.write_text(
         f"---\n"
@@ -64,6 +80,7 @@ def test_load_knowledge_documents_adds_source_metadata(tmp_path: Path):
         "company": "Apple Inc.",
         "document_type": "company_overview",
         "source_url": "https://investor.apple.com/",
+        "ticker_scope": "AAPL",
     }
 
 
@@ -97,6 +114,7 @@ def test_search_knowledge_returns_relevant_chunk(tmp_path: Path):
         chunk_size=200,
         chunk_overlap=0,
         k=1,
+        persist_directory=tmp_path / "index",
     )
     results = search_knowledge("What does Apple do?", retriever=retriever)
 
@@ -124,6 +142,7 @@ def test_search_knowledge_filters_low_score_chunks(tmp_path: Path):
         chunk_size=200,
         chunk_overlap=0,
         k=2,
+        persist_directory=tmp_path / "index",
     )
     results = search_knowledge("What does Apple do?", retriever=retriever)
 
@@ -153,6 +172,7 @@ def test_search_knowledge_filters_documents_by_requested_ticker(tmp_path: Path):
         k=2,
         score_threshold=0.0,
         tickers=["aapl"],
+        persist_directory=tmp_path / "index",
     )
     results = search_knowledge("What does Apple do?", retriever=retriever)
 
@@ -177,6 +197,80 @@ def test_build_knowledge_retriever_rejects_invalid_score_threshold(tmp_path: Pat
         assert str(exc) == "score_threshold must be between zero and one."
     else:
         raise AssertionError("Expected invalid score threshold to be rejected")
+
+
+def test_persistent_retriever_reuses_existing_index(tmp_path: Path):
+    write_company_document(
+        tmp_path / "apple.md",
+        "AAPL",
+        "Apple Inc.",
+        "Apple develops hardware and services.",
+    )
+    persist_directory = tmp_path / "index"
+
+    first_embeddings = CountingEmbeddings()
+    first_retriever = build_knowledge_retriever(
+        tmp_path,
+        embeddings=first_embeddings,
+        persist_directory=persist_directory,
+        collection_name="test_collection",
+        k=1,
+    )
+    first_results = search_knowledge("What does Apple do?", retriever=first_retriever)
+
+    second_embeddings = CountingEmbeddings()
+    second_retriever = build_knowledge_retriever(
+        tmp_path,
+        embeddings=second_embeddings,
+        persist_directory=persist_directory,
+        collection_name="test_collection",
+        k=1,
+    )
+    second_results = search_knowledge("What does Apple do?", retriever=second_retriever)
+
+    assert first_embeddings.document_calls == 1
+    assert second_embeddings.document_calls == 0
+    assert first_results[0].metadata["source"] == "apple.md"
+    assert second_results[0].metadata["source"] == "apple.md"
+    assert (persist_directory / "test_collection.manifest.json").exists()
+
+
+def test_persistent_retriever_rebuilds_when_documents_change(tmp_path: Path):
+    document_path = tmp_path / "apple.md"
+    write_company_document(
+        document_path,
+        "AAPL",
+        "Apple Inc.",
+        "Apple develops hardware and services.",
+    )
+    persist_directory = tmp_path / "index"
+
+    first_embeddings = CountingEmbeddings()
+    build_knowledge_retriever(
+        tmp_path,
+        embeddings=first_embeddings,
+        persist_directory=persist_directory,
+        collection_name="test_collection",
+        k=1,
+    )
+
+    write_company_document(
+        document_path,
+        "AAPL",
+        "Apple Inc.",
+        "Apple develops hardware, software, and services.",
+    )
+    second_embeddings = CountingEmbeddings()
+    build_knowledge_retriever(
+        tmp_path,
+        embeddings=second_embeddings,
+        persist_directory=persist_directory,
+        collection_name="test_collection",
+        k=1,
+    )
+
+    assert first_embeddings.document_calls == 1
+    assert second_embeddings.document_calls == 1
 
 
 def test_search_knowledge_rejects_empty_questions():

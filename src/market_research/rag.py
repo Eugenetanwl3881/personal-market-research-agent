@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -6,7 +8,6 @@ from typing import Any
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.retrievers import BaseRetriever
-from langchain_core.vectorstores import InMemoryVectorStore
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
@@ -14,8 +15,12 @@ DEFAULT_KNOWLEDGE_DIR = (
     Path(__file__).resolve().parents[2] / "knowledge"
 )
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_PERSIST_DIRECTORY = Path(__file__).resolve().parents[2] / ".rag_index"
+DEFAULT_COLLECTION_NAME = "market_research_knowledge"
 DEFAULT_RETRIEVAL_K = 2
 DEFAULT_RELEVANCE_THRESHOLD = 0.45
+INDEX_VERSION = 1
+GENERIC_TICKER_SCOPE = "__generic__"
 
 
 class KnowledgeDocumentMetadata(BaseModel):
@@ -44,25 +49,29 @@ class KnowledgeDocumentMetadata(BaseModel):
 class ScoreThresholdRetriever(BaseRetriever):
     """Retrieve only top-ranked chunks whose cosine score is high enough."""
 
-    vector_store: InMemoryVectorStore
+    vector_store: Any
     k: int = DEFAULT_RETRIEVAL_K
     score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD
     tickers: list[str] | None = None
 
-    def _matches_requested_tickers(self, document: Document) -> bool:
-        """Keep requested-company documents and untickered generic documents."""
+    def _metadata_filter(self) -> dict[str, Any] | None:
+        """Build a Chroma filter for requested and generic documents."""
         if not self.tickers:
-            return True
+            return None
 
-        document_ticker = document.metadata.get("ticker")
-        return document_ticker is None or document_ticker in self.tickers
+        return {
+            "$or": [
+                *({"ticker_scope": ticker} for ticker in self.tickers),
+                {"ticker_scope": GENERIC_TICKER_SCOPE},
+            ],
+        }
 
     def _get_relevant_documents(self, query: str) -> list[Document]:
         """Search the vector store and discard weakly related chunks."""
-        matches = self.vector_store.similarity_search_with_score(
+        matches = self.vector_store.similarity_search_with_relevance_scores(
             query,
             k=self.k,
-            filter=self._matches_requested_tickers,
+            filter=self._metadata_filter(),
         )
         relevant_documents = []
 
@@ -82,6 +91,128 @@ class ScoreThresholdRetriever(BaseRetriever):
             )
 
         return relevant_documents
+
+
+def _index_manifest_path(
+    persist_directory: Path,
+    collection_name: str,
+) -> Path:
+    """Return the sidecar manifest path for a persisted collection."""
+    return persist_directory / f"{collection_name}.manifest.json"
+
+
+def _embedding_identity(embeddings: Embeddings | None) -> str:
+    """Return a stable identity used to invalidate incompatible indexes."""
+    if embeddings is None:
+        return os.getenv("RAG_EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
+
+    embedding_type = type(embeddings)
+    return f"{embedding_type.__module__}.{embedding_type.__qualname__}"
+
+
+def _index_signature(
+    chunks: list[Document],
+    *,
+    chunk_size: int,
+    chunk_overlap: int,
+    embedding_identity: str,
+) -> str:
+    """Hash indexed content and configuration to detect stale persisted data."""
+    signature_input = {
+        "index_version": INDEX_VERSION,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+        "embedding_identity": embedding_identity,
+        "chunks": [
+            {
+                "content": chunk.page_content,
+                "metadata": chunk.metadata,
+            }
+            for chunk in chunks
+        ],
+    }
+    serialized = json.dumps(
+        signature_input,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _read_index_signature(manifest_path: Path) -> str | None:
+    """Read an existing index signature, returning None if unavailable."""
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    signature = manifest.get("index_signature")
+    return signature if isinstance(signature, str) else None
+
+
+def _has_expected_chunks(vector_store: Any, chunks: list[Document]) -> bool:
+    """Check that a matching collection still contains every expected chunk."""
+    expected_ids = {_stable_chunk_id(chunk) for chunk in chunks}
+    try:
+        stored_ids = set(vector_store.get(include=[])["ids"])
+    except Exception:
+        return False
+    return stored_ids == expected_ids
+
+
+def _write_index_manifest(
+    manifest_path: Path,
+    *,
+    signature: str,
+    chunk_count: int,
+) -> None:
+    """Write the metadata needed to decide whether an index can be reused."""
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "index_version": INDEX_VERSION,
+                "index_signature": signature,
+                "chunk_count": chunk_count,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _create_persistent_vector_store(
+    persist_directory: Path,
+    collection_name: str,
+    embeddings: Embeddings,
+):
+    """Create or open a local Chroma collection using cosine distance."""
+    from langchain_chroma import Chroma
+
+    return Chroma(
+        collection_name=collection_name,
+        embedding_function=embeddings,
+        persist_directory=str(persist_directory),
+        collection_configuration={"hnsw": {"space": "cosine"}},
+    )
+
+
+def _stable_chunk_id(chunk: Document) -> str:
+    """Create a deterministic ID so the persisted index is reproducible."""
+    serialized = json.dumps(
+        {
+            "content": chunk.page_content,
+            "metadata": chunk.metadata,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _parse_markdown_frontmatter(
@@ -115,6 +246,10 @@ def _parse_markdown_frontmatter(
     metadata = KnowledgeDocumentMetadata.model_validate(raw_metadata)
     document_metadata = metadata.model_dump(exclude_none=True)
     document_metadata["source"] = source_name
+    document_metadata["ticker_scope"] = document_metadata.get(
+        "ticker",
+        GENERIC_TICKER_SCOPE,
+    )
 
     body = "".join(lines[closing_index + 1:]).lstrip()
     return document_metadata, body
@@ -183,8 +318,11 @@ def build_knowledge_retriever(
     k: int = DEFAULT_RETRIEVAL_K,
     score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
     tickers: list[str] | None = None,
+    persist_directory: str | Path | None = None,
+    collection_name: str = DEFAULT_COLLECTION_NAME,
+    force_rebuild: bool = False,
 ):
-    """Build a relevance-filtered retriever from local Markdown documents."""
+    """Build or reuse a persistent, relevance-filtered knowledge retriever."""
     if k <= 0:
         raise ValueError("k must be greater than zero.")
     if not 0 <= score_threshold <= 1:
@@ -198,10 +336,52 @@ def build_knowledge_retriever(
 
     documents = load_knowledge_documents(knowledge_dir)
     chunks = split_documents(documents, chunk_size, chunk_overlap)
-    vector_store = InMemoryVectorStore(
-        embedding=embeddings or create_embeddings(),
+    embedding_function = embeddings or create_embeddings()
+    embedding_identity = _embedding_identity(embeddings)
+    signature = _index_signature(
+        chunks,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        embedding_identity=embedding_identity,
     )
-    vector_store.add_documents(chunks)
+
+    index_directory = Path(
+        persist_directory
+        or os.getenv("RAG_INDEX_DIR")
+        or DEFAULT_PERSIST_DIRECTORY
+    )
+    index_directory.mkdir(parents=True, exist_ok=True)
+    manifest_path = _index_manifest_path(index_directory, collection_name)
+    vector_store = _create_persistent_vector_store(
+        index_directory,
+        collection_name,
+        embedding_function,
+    )
+
+    index_is_current = (
+        not force_rebuild
+        and _read_index_signature(manifest_path) == signature
+    )
+    if index_is_current:
+        index_is_current = _has_expected_chunks(vector_store, chunks)
+
+    if not index_is_current:
+        vector_store.delete_collection()
+        vector_store = _create_persistent_vector_store(
+            index_directory,
+            collection_name,
+            embedding_function,
+        )
+        vector_store.add_documents(
+            chunks,
+            ids=[_stable_chunk_id(chunk) for chunk in chunks],
+        )
+        _write_index_manifest(
+            manifest_path,
+            signature=signature,
+            chunk_count=len(chunks),
+        )
+
     return ScoreThresholdRetriever(
         vector_store=vector_store,
         k=k,

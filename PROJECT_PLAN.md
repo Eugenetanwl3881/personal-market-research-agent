@@ -13,6 +13,7 @@
 - Grounded answer format with explicit source links and limitations.
 - Prompt-injection protections for retrieved news content.
 - Two-step RAG retrieval over a local Markdown knowledge base.
+- Persistent Chroma-backed RAG index with manifest-based rebuild detection.
 - Reference evidence passed to the answer model with source labels.
 - Graph-step and token-level hybrid streaming in the CLI.
 - Mocked tests for normal and failure scenarios.
@@ -20,7 +21,7 @@
 ## Next improvements
 
 1. Improve news relevance and source-quality ranking.
-2. Persist the RAG index and add an explicit document-ingestion command.
+2. Add an explicit document-ingestion command so indexing can be run independently.
 3. Add PDF and official-filing ingestion with document metadata and page citations.
 4. Add clearer multi-ticker comparison output, including optional calculated differences.
 5. Add retries, timeouts, and observability for external providers.

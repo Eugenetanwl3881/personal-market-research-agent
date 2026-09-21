@@ -35,7 +35,7 @@ The current RAG path is a predictable two-step flow:
 Question → retrieve relevant reference chunks → grounded answer
 ```
 
-The initial knowledge base is stored in `knowledge/` as Markdown with YAML frontmatter metadata. The retriever uses local embeddings and an in-memory vector store; the index is rebuilt when the process starts. It returns at most the two highest-scoring chunks, filters out chunks below a relevance threshold, and uses ticker metadata to exclude unrelated company documents while retaining generic untickered documents.
+The initial knowledge base is stored in `knowledge/` as Markdown with YAML frontmatter metadata. The retriever uses local embeddings and a persistent Chroma vector store. By default, the index is stored in `.rag_index/`; set `RAG_INDEX_DIR` to use another local directory. A manifest hashes the source chunks, metadata, chunking settings, embedding identity, and index version, so the index is reused across CLI runs and rebuilt when its inputs change. It returns at most the two highest-scoring chunks, filters out chunks below a relevance threshold, and uses ticker metadata to exclude unrelated company documents while retaining generic untickered documents.
 
 Company documents declare metadata explicitly:
 
@@ -76,7 +76,7 @@ flowchart TD
 - Python 3.11+
 - LangGraph
 - LangChain Core and `langchain-openai`
-- `langchain-text-splitters` and `langchain-huggingface`
+- `langchain-text-splitters`, `langchain-huggingface`, and `langchain-chroma`
 - `sentence-transformers` for local document embeddings
 - `PyYAML` for knowledge-document frontmatter
 - An OpenAI-compatible model endpoint (currently configured for OpenCode Go)
@@ -147,7 +147,7 @@ External services are mocked in the normal tests, so they are fast, deterministi
 
 - Prices are latest available closes, not guaranteed live prices.
 - Yahoo Finance and Tavily data can be delayed, incomplete, or unavailable.
-- The initial RAG corpus is small and local; its vector index is not yet persisted.
+- The initial RAG corpus is small and local; document ingestion is currently performed when the retriever checks the persisted index.
 - Hugging Face authentication is currently optional; configure `HF_TOKEN` later
   if higher rate limits or more reliable embedding-model downloads are needed.
 - The RAG retriever currently uses Markdown documents; PDF and automated document ingestion are future work.
