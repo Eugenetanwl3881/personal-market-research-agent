@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,33 @@ DEFAULT_RETRIEVAL_K = 2
 DEFAULT_RELEVANCE_THRESHOLD = 0.45
 INDEX_VERSION = 1
 GENERIC_TICKER_SCOPE = "__generic__"
+
+
+@dataclass(frozen=True)
+class KnowledgeIndexReport:
+    """Summary of an explicit knowledge-indexing operation."""
+
+    knowledge_directory: Path
+    persist_directory: Path
+    collection_name: str
+    document_count: int
+    chunk_count: int
+    rebuilt: bool
+    manifest_path: Path
+
+
+@dataclass
+class _PreparedKnowledgeIndex:
+    """Internal result shared by indexing and retriever construction."""
+
+    vector_store: Any
+    knowledge_directory: Path
+    persist_directory: Path
+    collection_name: str
+    documents: list[Document]
+    chunks: list[Document]
+    manifest_path: Path
+    rebuilt: bool
 
 
 class KnowledgeDocumentMetadata(BaseModel):
@@ -187,7 +215,7 @@ def _write_index_manifest(
 def _create_persistent_vector_store(
     persist_directory: Path,
     collection_name: str,
-    embeddings: Embeddings,
+    embeddings: Embeddings | None,
 ):
     """Create or open a local Chroma collection using cosine distance."""
     from langchain_chroma import Chroma
@@ -309,34 +337,26 @@ def create_embeddings(model_name: str | None = None) -> Embeddings:
     )
 
 
-def build_knowledge_retriever(
+def _prepare_knowledge_index(
     knowledge_dir: str | Path | None = None,
     embeddings: Embeddings | None = None,
     *,
     chunk_size: int = 600,
     chunk_overlap: int = 100,
-    k: int = DEFAULT_RETRIEVAL_K,
-    score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
-    tickers: list[str] | None = None,
     persist_directory: str | Path | None = None,
     collection_name: str = DEFAULT_COLLECTION_NAME,
     force_rebuild: bool = False,
-):
-    """Build or reuse a persistent, relevance-filtered knowledge retriever."""
-    if k <= 0:
-        raise ValueError("k must be greater than zero.")
-    if not 0 <= score_threshold <= 1:
-        raise ValueError("score_threshold must be between zero and one.")
-
-    requested_tickers = list(dict.fromkeys(
-        ticker.strip().upper()
-        for ticker in (tickers or [])
-        if ticker.strip()
-    ))
-
-    documents = load_knowledge_documents(knowledge_dir)
+    require_embedding_function: bool = False,
+) -> _PreparedKnowledgeIndex:
+    """Load documents and build or reuse their persistent vector index."""
+    knowledge_directory = (
+        Path(knowledge_dir) if knowledge_dir else DEFAULT_KNOWLEDGE_DIR
+    )
+    documents = load_knowledge_documents(knowledge_directory)
     chunks = split_documents(documents, chunk_size, chunk_overlap)
-    embedding_function = embeddings or create_embeddings()
+    embedding_function = embeddings
+    if require_embedding_function and embedding_function is None:
+        embedding_function = create_embeddings()
     embedding_identity = _embedding_identity(embeddings)
     signature = _index_signature(
         chunks,
@@ -366,6 +386,8 @@ def build_knowledge_retriever(
         index_is_current = _has_expected_chunks(vector_store, chunks)
 
     if not index_is_current:
+        if embedding_function is None:
+            embedding_function = create_embeddings()
         vector_store.delete_collection()
         vector_store = _create_persistent_vector_store(
             index_directory,
@@ -382,8 +404,88 @@ def build_knowledge_retriever(
             chunk_count=len(chunks),
         )
 
-    return ScoreThresholdRetriever(
+    return _PreparedKnowledgeIndex(
         vector_store=vector_store,
+        knowledge_directory=knowledge_directory,
+        persist_directory=index_directory,
+        collection_name=collection_name,
+        documents=documents,
+        chunks=chunks,
+        manifest_path=manifest_path,
+        rebuilt=not index_is_current,
+    )
+
+
+def ingest_knowledge_base(
+    knowledge_dir: str | Path | None = None,
+    embeddings: Embeddings | None = None,
+    *,
+    chunk_size: int = 600,
+    chunk_overlap: int = 100,
+    persist_directory: str | Path | None = None,
+    collection_name: str = DEFAULT_COLLECTION_NAME,
+    force_rebuild: bool = False,
+) -> KnowledgeIndexReport:
+    """Explicitly build or refresh the persistent knowledge index."""
+    prepared = _prepare_knowledge_index(
+        knowledge_dir,
+        embeddings,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        persist_directory=persist_directory,
+        collection_name=collection_name,
+        force_rebuild=force_rebuild,
+        require_embedding_function=False,
+    )
+    return KnowledgeIndexReport(
+        knowledge_directory=prepared.knowledge_directory,
+        persist_directory=prepared.persist_directory,
+        collection_name=prepared.collection_name,
+        document_count=len(prepared.documents),
+        chunk_count=len(prepared.chunks),
+        rebuilt=prepared.rebuilt,
+        manifest_path=prepared.manifest_path,
+    )
+
+
+def build_knowledge_retriever(
+    knowledge_dir: str | Path | None = None,
+    embeddings: Embeddings | None = None,
+    *,
+    chunk_size: int = 600,
+    chunk_overlap: int = 100,
+    k: int = DEFAULT_RETRIEVAL_K,
+    score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
+    tickers: list[str] | None = None,
+    persist_directory: str | Path | None = None,
+    collection_name: str = DEFAULT_COLLECTION_NAME,
+    force_rebuild: bool = False,
+):
+    """Build or reuse a persistent, relevance-filtered knowledge retriever."""
+    if k <= 0:
+        raise ValueError("k must be greater than zero.")
+    if not 0 <= score_threshold <= 1:
+        raise ValueError("score_threshold must be between zero and one.")
+
+    requested_tickers = list(dict.fromkeys(
+        ticker.strip().upper()
+        for ticker in (tickers or [])
+        if ticker.strip()
+    ))
+
+    prepared = _prepare_knowledge_index(
+        knowledge_dir,
+        embeddings,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        persist_directory=persist_directory,
+        collection_name=collection_name,
+        force_rebuild=force_rebuild,
+        require_embedding_function=True,
+    )
+
+    return ScoreThresholdRetriever(
+        vector_store=prepared.vector_store,
         k=k,
         score_threshold=score_threshold,
         tickers=requested_tickers or None,

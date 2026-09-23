@@ -94,6 +94,7 @@ steps
 | `calculations.py` | Exact share-cost arithmetic and input validation. |
 | `graph.py` | Nodes, state updates, conditional routing, RAG retrieval, and partial-answer fallbacks. |
 | `rag.py` | Markdown loading, chunking, local embeddings, persistent Chroma storage, index invalidation, and similarity retrieval. |
+| `ingest.py` | Explicit knowledge-index preparation and rebuild reporting. |
 | `answer.py` | Trusted section formatting, quote/news/reference grounding, prompt-injection defense, and narrative streaming. |
 | `cli.py` | User input, graph execution, and terminal output. |
 

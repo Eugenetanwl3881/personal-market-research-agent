@@ -5,6 +5,7 @@ from langchain_core.embeddings import Embeddings
 
 from market_research.rag import (
     build_knowledge_retriever,
+    ingest_knowledge_base,
     load_knowledge_documents,
     search_knowledge,
     split_documents,
@@ -271,6 +272,37 @@ def test_persistent_retriever_rebuilds_when_documents_change(tmp_path: Path):
 
     assert first_embeddings.document_calls == 1
     assert second_embeddings.document_calls == 1
+
+
+def test_ingest_knowledge_base_reports_rebuild_and_reuse(tmp_path: Path):
+    write_company_document(
+        tmp_path / "apple.md",
+        "AAPL",
+        "Apple Inc.",
+        "Apple develops hardware and services.",
+    )
+    persist_directory = tmp_path / "index"
+
+    first_report = ingest_knowledge_base(
+        tmp_path,
+        embeddings=CountingEmbeddings(),
+        persist_directory=persist_directory,
+        collection_name="test_collection",
+    )
+    second_report = ingest_knowledge_base(
+        tmp_path,
+        embeddings=CountingEmbeddings(),
+        persist_directory=persist_directory,
+        collection_name="test_collection",
+    )
+
+    assert first_report.rebuilt is True
+    assert second_report.rebuilt is False
+    assert first_report.document_count == 1
+    assert first_report.chunk_count == 1
+    assert second_report.manifest_path == (
+        persist_directory / "test_collection.manifest.json"
+    )
 
 
 def test_search_knowledge_rejects_empty_questions():

@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 market-research = "market_research.cli:main"
+market-research-index = "market_research.ingest:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

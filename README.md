@@ -119,6 +119,20 @@ python -m market_research.cli "Compare AAPL and MSFT prices."
 
 Running `market-research` with no question starts an interactive prompt.
 
+Prepare the local RAG index explicitly with:
+
+```bash
+market-research-index
+```
+
+The equivalent module command is:
+
+```bash
+python -m market_research.ingest
+```
+
+Use `--force` or `--force-rebuild` to rebuild even when the existing index is current. You can override the source and output locations with `--knowledge-dir` and `--index-dir`. Research queries still check the index automatically, so explicit ingestion is optional but useful when preparing a deployment or verifying the knowledge base.
+
 ## Output design
 
 Python renders predictable, data-sensitive sections:
@@ -147,9 +161,8 @@ External services are mocked in the normal tests, so they are fast, deterministi
 
 - Prices are latest available closes, not guaranteed live prices.
 - Yahoo Finance and Tavily data can be delayed, incomplete, or unavailable.
-- The initial RAG corpus is small and local; document ingestion is currently performed when the retriever checks the persisted index.
+- The initial RAG corpus is small and local; it currently uses Markdown knowledge documents. PDF, official-filing, and automated online ingestion are future work.
 - Hugging Face authentication is currently optional; configure `HF_TOKEN` later
   if higher rate limits or more reliable embedding-model downloads are needed.
-- The RAG retriever currently uses Markdown documents; PDF and automated document ingestion are future work.
 - The first version has no portfolios, trade execution, database, dashboard, or conversation memory.
 - The assistant does not provide personalized buy/sell recommendations. (YET)
