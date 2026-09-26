@@ -16,6 +16,7 @@
 - Persistent Chroma-backed RAG index with manifest-based rebuild detection.
 - Standalone `market-research-index` command for explicit knowledge ingestion.
 - Deterministic RAG retrieval evaluation cases for company, methodology, and ticker filtering.
+- Richer sectioned company and methodology documents with review/version metadata.
 - Reference evidence passed to the answer model with source labels.
 - Graph-step and token-level hybrid streaming in the CLI.
 - Mocked tests for normal and failure scenarios.

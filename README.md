@@ -45,6 +45,9 @@ ticker: AAPL
 company: Apple Inc.
 document_type: company_overview
 source_url: https://investor.apple.com/
+source_name: Apple Investor Relations
+last_reviewed: 2026-09-26
+document_version: "1.1"
 ---
 ```
 

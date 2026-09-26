@@ -82,7 +82,7 @@ final_answer
 steps
 ```
 
-`quote` holds one structured quote per ticker. Each quote includes price, currency, price type, trading date, retrieval time, freshness status, and source. `news` contains structured article fields: title, publisher, publication timestamp, URL, and content excerpt. Knowledge documents declare validated YAML frontmatter metadata such as ticker, company, document type, and source URL. RAG context is limited to the highest-scoring chunks that pass the configured relevance threshold; company-specific retrieval also filters by ticker metadata while retaining generic untickered documents, and each chunk retains its retrieval score in metadata.
+`quote` holds one structured quote per ticker. Each quote includes price, currency, price type, trading date, retrieval time, freshness status, and source. `news` contains structured article fields: title, publisher, publication timestamp, URL, and content excerpt. Knowledge documents declare validated YAML frontmatter metadata such as ticker, company, document type, source URL, source name, review date, and document version. RAG context is limited to the highest-scoring chunks that pass the configured relevance threshold; company-specific retrieval also filters by ticker metadata while retaining generic untickered documents, and each chunk retains its retrieval score in metadata.
 
 ## Component responsibilities
 

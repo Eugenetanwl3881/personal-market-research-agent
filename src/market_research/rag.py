@@ -3,6 +3,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +62,9 @@ class KnowledgeDocumentMetadata(BaseModel):
     document_type: str
     source_url: str | None = None
     source_name: str | None = None
+    published_date: date | None = None
+    last_reviewed: date | None = None
+    document_version: str | None = None
 
     @field_validator("ticker")
     @classmethod
@@ -272,7 +276,7 @@ def _parse_markdown_frontmatter(
         )
 
     metadata = KnowledgeDocumentMetadata.model_validate(raw_metadata)
-    document_metadata = metadata.model_dump(exclude_none=True)
+    document_metadata = metadata.model_dump(mode="json", exclude_none=True)
     document_metadata["source"] = source_name
     document_metadata["ticker_scope"] = document_metadata.get(
         "ticker",

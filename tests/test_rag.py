@@ -98,6 +98,25 @@ def test_load_knowledge_documents_adds_source_metadata(tmp_path: Path):
     }
 
 
+def test_load_knowledge_documents_normalizes_date_metadata(tmp_path: Path):
+    (tmp_path / "dated.md").write_text(
+        "---\n"
+        "document_type: company_overview\n"
+        "published_date: 2026-01-15\n"
+        "last_reviewed: 2026-09-26\n"
+        "document_version: \"1.0\"\n"
+        "---\n\n"
+        "A dated reference document.",
+        encoding="utf-8",
+    )
+
+    documents = load_knowledge_documents(tmp_path)
+
+    assert documents[0].metadata["published_date"] == "2026-01-15"
+    assert documents[0].metadata["last_reviewed"] == "2026-09-26"
+    assert documents[0].metadata["document_version"] == "1.0"
+
+
 def test_split_documents_preserves_metadata_and_creates_chunks():
     documents = [Document(page_content="Apple business information " * 50, metadata={"source": "apple.md"})]
 
