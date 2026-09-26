@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
@@ -55,6 +56,18 @@ def write_company_document(path: Path, ticker: str, company: str, body: str):
         f"source_url: https://example.com/{ticker.lower()}\n"
         f"---\n\n"
         f"{body}",
+        encoding="utf-8",
+    )
+
+
+def write_methodology_document(path: Path):
+    path.write_text(
+        "---\n"
+        "document_type: methodology\n"
+        "source_name: Internal project methodology\n"
+        "---\n\n"
+        "The latest available closing price is not necessarily a live price.\n"
+        "Share-cost calculations use price multiplied by shares.",
         encoding="utf-8",
     )
 
@@ -312,3 +325,91 @@ def test_search_knowledge_rejects_empty_questions():
         assert str(exc) == "Knowledge search question must not be empty."
     else:
         raise AssertionError("Expected empty knowledge search to fail")
+
+
+@pytest.mark.parametrize(
+    ("question", "tickers", "expected_source"),
+    [
+        (
+            "What are Apple's major business segments?",
+            ["AAPL"],
+            "apple.md",
+        ),
+        (
+            "What are Microsoft's major business segments?",
+            ["MSFT"],
+            "microsoft.md",
+        ),
+        (
+            "What is the quote freshness methodology?",
+            [],
+            "methodology.md",
+        ),
+    ],
+)
+def test_retrieval_evaluation_cases(
+    tmp_path: Path,
+    question: str,
+    tickers: list[str],
+    expected_source: str,
+):
+    write_company_document(
+        tmp_path / "apple.md",
+        "AAPL",
+        "Apple Inc.",
+        "Apple's major business segments include iPhone, Mac, and Services.",
+    )
+    write_company_document(
+        tmp_path / "microsoft.md",
+        "MSFT",
+        "Microsoft Corporation",
+        "Microsoft's major business segments include Productivity, Cloud, and More Personal Computing.",
+    )
+    write_methodology_document(tmp_path / "methodology.md")
+
+    retriever = build_knowledge_retriever(
+        tmp_path,
+        embeddings=KeywordEmbeddings(),
+        k=2,
+        score_threshold=0.45,
+        tickers=tickers,
+        persist_directory=tmp_path / "index",
+        collection_name="evaluation",
+    )
+    results = search_knowledge(question, retriever=retriever)
+
+    assert [result.metadata["source"] for result in results] == [expected_source]
+    assert results[0].metadata["relevance_score"] >= 0.45
+
+
+def test_retrieval_evaluation_prevents_cross_company_context(tmp_path: Path):
+    write_company_document(
+        tmp_path / "apple.md",
+        "AAPL",
+        "Apple Inc.",
+        "Apple's major business segments include iPhone, Mac, and Services.",
+    )
+    write_company_document(
+        tmp_path / "microsoft.md",
+        "MSFT",
+        "Microsoft Corporation",
+        "Microsoft's major business segments include Productivity, Cloud, and More Personal Computing.",
+    )
+
+    retriever = build_knowledge_retriever(
+        tmp_path,
+        embeddings=KeywordEmbeddings(),
+        k=2,
+        score_threshold=0.0,
+        tickers=["AAPL"],
+        persist_directory=tmp_path / "index",
+        collection_name="evaluation",
+    )
+    results = search_knowledge(
+        "What are Microsoft's major business segments?",
+        retriever=retriever,
+    )
+
+    assert "microsoft.md" not in {
+        result.metadata["source"] for result in results
+    }

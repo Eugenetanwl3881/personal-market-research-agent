@@ -157,6 +157,8 @@ python -m pytest -q
 
 External services are mocked in the normal tests, so they are fast, deterministic, and do not consume Yahoo, Tavily, or model API requests.
 
+The RAG tests also include deterministic evaluation cases for Apple, Microsoft, methodology questions, and ticker-filter cross-contamination.
+
 ## Current limitations
 
 - Prices are latest available closes, not guaranteed live prices.
