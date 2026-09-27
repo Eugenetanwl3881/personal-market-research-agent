@@ -247,6 +247,33 @@ def _stable_chunk_id(chunk: Document) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def _load_yaml_mapping(content: str, source_name: str) -> dict[str, Any]:
+    """Load a YAML mapping from a metadata source."""
+    import yaml
+
+    raw_metadata = yaml.safe_load(content) or {}
+    if not isinstance(raw_metadata, dict):
+        raise ValueError(
+            f"Knowledge document metadata must be a mapping: {source_name}"
+        )
+    return raw_metadata
+
+
+def _build_document_metadata(
+    raw_metadata: dict[str, Any],
+    source_name: str,
+) -> dict[str, Any]:
+    """Validate declared metadata and add internal retrieval fields."""
+    metadata = KnowledgeDocumentMetadata.model_validate(raw_metadata)
+    document_metadata = metadata.model_dump(mode="json", exclude_none=True)
+    document_metadata["source"] = source_name
+    document_metadata["ticker_scope"] = document_metadata.get(
+        "ticker",
+        GENERIC_TICKER_SCOPE,
+    )
+    return document_metadata
+
+
 def _parse_markdown_frontmatter(
     content: str,
     source_name: str,
@@ -267,43 +294,107 @@ def _parse_markdown_frontmatter(
             f"Knowledge document frontmatter is not closed: {source_name}"
         )
 
-    import yaml
-
-    raw_metadata = yaml.safe_load("".join(lines[1:closing_index])) or {}
-    if not isinstance(raw_metadata, dict):
-        raise ValueError(
-            f"Knowledge document metadata must be a mapping: {source_name}"
-        )
-
-    metadata = KnowledgeDocumentMetadata.model_validate(raw_metadata)
-    document_metadata = metadata.model_dump(mode="json", exclude_none=True)
-    document_metadata["source"] = source_name
-    document_metadata["ticker_scope"] = document_metadata.get(
-        "ticker",
-        GENERIC_TICKER_SCOPE,
+    document_metadata = _build_document_metadata(
+        _load_yaml_mapping(
+            "".join(lines[1:closing_index]),
+            source_name,
+        ),
+        source_name,
     )
 
     body = "".join(lines[closing_index + 1:]).lstrip()
     return document_metadata, body
 
 
+def _pdf_metadata_path(pdf_path: Path) -> Path:
+    """Find the required YAML sidecar for a PDF document."""
+    candidates = [pdf_path.with_suffix(".yaml"), pdf_path.with_suffix(".yml")]
+    existing = [path for path in candidates if path.exists()]
+    if not existing:
+        raise FileNotFoundError(
+            f"PDF knowledge document requires a YAML sidecar: {pdf_path} "
+            f"(expected {candidates[0].name})"
+        )
+    if len(existing) > 1:
+        raise ValueError(
+            f"PDF knowledge document has multiple YAML sidecars: {pdf_path}"
+        )
+    return existing[0]
+
+
+def _load_pdf_documents(pdf_path: Path, source_name: str) -> list[Document]:
+    """Extract one Document per non-empty PDF page with page metadata."""
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise RuntimeError(
+            "PDF ingestion requires the pypdf package. Install the project "
+            "dependencies before loading PDF knowledge documents."
+        ) from exc
+
+    metadata_path = _pdf_metadata_path(pdf_path)
+    metadata = _build_document_metadata(
+        _load_yaml_mapping(
+            metadata_path.read_text(encoding="utf-8"),
+            str(metadata_path),
+        ),
+        source_name,
+    )
+    reader = PdfReader(str(pdf_path))
+    page_count = len(reader.pages)
+    documents = []
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        page_content = (page.extract_text() or "").strip()
+        if not page_content:
+            continue
+
+        documents.append(
+            Document(
+                page_content=page_content,
+                metadata={
+                    **metadata,
+                    "source_format": "pdf",
+                    "page_number": page_number,
+                    "page_count": page_count,
+                },
+            )
+        )
+
+    if not documents:
+        raise ValueError(f"PDF contains no extractable text: {pdf_path}")
+
+    return documents
+
+
 def load_knowledge_documents(
     knowledge_dir: str | Path | None = None,
 ) -> list[Document]:
-    """Load Markdown files with validated YAML frontmatter metadata."""
+    """Load Markdown and PDF files with validated metadata."""
     directory = Path(knowledge_dir) if knowledge_dir else DEFAULT_KNOWLEDGE_DIR
 
     if not directory.exists():
         raise FileNotFoundError(f"Knowledge directory does not exist: {directory}")
 
-    paths = sorted(directory.glob("*.md"))
+    paths = sorted(
+        path
+        for path in directory.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".md", ".pdf"}
+    )
     if not paths:
-        raise FileNotFoundError(f"No Markdown documents found in: {directory}")
+        raise FileNotFoundError(
+            f"No Markdown or PDF documents found in: {directory}"
+        )
 
     documents = []
     for path in paths:
+        source_name = path.relative_to(directory).as_posix()
+        if path.suffix.lower() == ".pdf":
+            documents.extend(_load_pdf_documents(path, source_name))
+            continue
+
         content = path.read_text(encoding="utf-8")
-        metadata, body = _parse_markdown_frontmatter(content, path.name)
+        metadata, body = _parse_markdown_frontmatter(content, source_name)
         documents.append(Document(page_content=body, metadata=metadata))
 
     return documents

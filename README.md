@@ -80,6 +80,7 @@ flowchart TD
 - LangGraph
 - LangChain Core and `langchain-openai`
 - `langchain-text-splitters`, `langchain-huggingface`, and `langchain-chroma`
+- `pypdf` for page-level PDF text extraction
 - `sentence-transformers` for local document embeddings
 - `PyYAML` for knowledge-document frontmatter
 - An OpenAI-compatible model endpoint (currently configured for OpenCode Go)
@@ -136,6 +137,28 @@ python -m market_research.ingest
 
 Use `--force` or `--force-rebuild` to rebuild even when the existing index is current. You can override the source and output locations with `--knowledge-dir` and `--index-dir`. Research queries still check the index automatically, so explicit ingestion is optional but useful when preparing a deployment or verifying the knowledge base.
 
+PDF files can be placed anywhere below the knowledge directory. Each PDF requires a same-named YAML sidecar because PDFs do not contain the project’s frontmatter format:
+
+```text
+knowledge/raw/apple/annual_report_2025.pdf
+knowledge/raw/apple/annual_report_2025.yaml
+```
+
+Example sidecar:
+
+```yaml
+ticker: AAPL
+company: Apple Inc.
+document_type: annual_report
+source_name: Apple Investor Relations
+source_url: https://example.com/apple-report.pdf
+published_date: 2025-10-31
+last_reviewed: 2026-09-26
+document_version: "2025"
+```
+
+The loader creates one document per non-empty PDF page and preserves `page_number`, `page_count`, `source`, and `source_format` metadata. Run `market-research-index --force` after adding or changing a PDF. Scanned image-only PDFs are not supported yet because they require OCR.
+
 ## Output design
 
 Python renders predictable, data-sensitive sections:
@@ -166,7 +189,7 @@ The RAG tests also include deterministic evaluation cases for Apple, Microsoft, 
 
 - Prices are latest available closes, not guaranteed live prices.
 - Yahoo Finance and Tavily data can be delayed, incomplete, or unavailable.
-- The initial RAG corpus is small and local; it currently uses Markdown knowledge documents. PDF, official-filing, and automated online ingestion are future work.
+- The initial RAG corpus is small and local; automated downloading and refreshing of official filings are future work.
 - Hugging Face authentication is currently optional; configure `HF_TOKEN` later
   if higher rate limits or more reliable embedding-model downloads are needed.
 - The first version has no portfolios, trade execution, database, dashboard, or conversation memory.

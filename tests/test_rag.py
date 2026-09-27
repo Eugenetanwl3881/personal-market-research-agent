@@ -3,6 +3,12 @@ from pathlib import Path
 import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+from pypdf import PdfWriter
+from pypdf.generic import (
+    DecodedStreamObject,
+    DictionaryObject,
+    NameObject,
+)
 
 from market_research.rag import (
     build_knowledge_retriever,
@@ -72,6 +78,37 @@ def write_methodology_document(path: Path):
     )
 
 
+def write_text_pdf(path: Path, pages: list[str]):
+    writer = PdfWriter()
+    font = writer._add_object(
+        DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Font"),
+                NameObject("/Subtype"): NameObject("/Type1"),
+                NameObject("/BaseFont"): NameObject("/Helvetica"),
+            }
+        )
+    )
+
+    for text in pages:
+        page = writer.add_blank_page(width=612, height=792)
+        page[NameObject("/Resources")] = DictionaryObject(
+            {
+                NameObject("/Font"): DictionaryObject(
+                    {NameObject("/F1"): font}
+                )
+            }
+        )
+        content = DecodedStreamObject()
+        content.set_data(
+            f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("latin-1")
+        )
+        page[NameObject("/Contents")] = writer._add_object(content)
+
+    with path.open("wb") as file:
+        writer.write(file)
+
+
 def test_load_knowledge_documents_adds_source_metadata(tmp_path: Path):
     (tmp_path / "apple.md").write_text(
         "---\n"
@@ -115,6 +152,49 @@ def test_load_knowledge_documents_normalizes_date_metadata(tmp_path: Path):
     assert documents[0].metadata["published_date"] == "2026-01-15"
     assert documents[0].metadata["last_reviewed"] == "2026-09-26"
     assert documents[0].metadata["document_version"] == "1.0"
+
+
+def test_load_knowledge_documents_extracts_pdf_pages_with_sidecar_metadata(
+    tmp_path: Path,
+):
+    pdf_path = tmp_path / "raw" / "apple_annual_report.pdf"
+    pdf_path.parent.mkdir()
+    write_text_pdf(
+        pdf_path,
+        ["Apple annual report page one.", "Apple annual report page two."],
+    )
+    pdf_path.with_suffix(".yaml").write_text(
+        "ticker: AAPL\n"
+        "company: Apple Inc.\n"
+        "document_type: annual_report\n"
+        "source_name: Apple Investor Relations\n"
+        "source_url: https://example.com/apple-report.pdf\n"
+        "published_date: 2026-01-15\n"
+        "last_reviewed: 2026-09-26\n"
+        "document_version: \"2025\"\n",
+        encoding="utf-8",
+    )
+
+    documents = load_knowledge_documents(tmp_path)
+
+    assert [document.page_content for document in documents] == [
+        "Apple annual report page one.",
+        "Apple annual report page two.",
+    ]
+    assert [document.metadata["page_number"] for document in documents] == [1, 2]
+    assert all(document.metadata["page_count"] == 2 for document in documents)
+    assert all(document.metadata["source"] == "raw/apple_annual_report.pdf" for document in documents)
+    assert all(document.metadata["source_format"] == "pdf" for document in documents)
+    assert documents[0].metadata["ticker_scope"] == "AAPL"
+    assert documents[0].metadata["published_date"] == "2026-01-15"
+
+
+def test_load_knowledge_documents_requires_pdf_sidecar(tmp_path: Path):
+    pdf_path = tmp_path / "report.pdf"
+    write_text_pdf(pdf_path, ["A report without metadata."])
+
+    with pytest.raises(FileNotFoundError, match="requires a YAML sidecar"):
+        load_knowledge_documents(tmp_path)
 
 
 def test_split_documents_preserves_metadata_and_creates_chunks():
