@@ -214,6 +214,18 @@ External services are mocked in the normal tests, so they are fast, deterministi
 
 The RAG tests also include deterministic evaluation cases for Apple, Microsoft, methodology questions, keyword recovery when vector search misses the answer, company/year filtering, PDF margin cleanup, adjacent context, and PDF page references.
 
+To measure retrieval with the real embedding model and current documents:
+
+```bash
+python -m market_research.evaluate
+```
+
+This evaluates ten labelled questions without calling the answer model or market
+data APIs. Results and retrieved evidence are saved to the Git-ignored
+`evaluations/results/latest.json`. See [the evaluation guide](evaluations/README.md)
+for metrics and known baseline failures. It checks retrieval directly; it does
+not evaluate request parsing or final-answer quality.
+
 ## Current limitations
 
 - Prices are latest available closes, not guaranteed live prices.

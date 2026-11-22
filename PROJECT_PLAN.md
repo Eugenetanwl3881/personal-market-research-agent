@@ -16,6 +16,7 @@
 - Persistent Chroma-backed RAG index with manifest-based rebuild detection.
 - Standalone `market-research-index` command for explicit knowledge ingestion.
 - Deterministic RAG retrieval evaluation cases for company, methodology, and ticker filtering.
+- Real-embedding retrieval evaluation command with ten labelled cases, saved evidence, and baseline metrics.
 - Richer sectioned company and methodology documents with review/version metadata.
 - Page-aware PDF ingestion with required YAML sidecar metadata.
 - Hybrid BM25/vector retrieval with company/report-year filtering, PDF margin cleanup, and neighboring context.

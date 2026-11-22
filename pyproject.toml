@@ -26,6 +26,7 @@ dependencies = [
 market-research = "market_research.cli:main"
 market-research-index = "market_research.ingest:main"
 market-research-fetch = "market_research.fetch:main"
+market-research-evaluate = "market_research.evaluate:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

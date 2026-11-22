@@ -8,3 +8,7 @@ dist/
 build/
 *.egg-info/
 .rag_index/
+
+# Local learning notes
+/LEARNING_ROADMAP.md
+/evaluations/results/

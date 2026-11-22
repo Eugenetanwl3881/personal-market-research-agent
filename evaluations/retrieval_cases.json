@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "apple-reportable-segments",
+      "question": "According to Apple's 2025 Form 10-K, what are its reportable segments?",
+      "tickers": ["AAPL"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/apple/annual_report_2025.pdf",
+        "pages": [5, 50],
+        "required_terms": ["Americas", "Europe", "Greater China", "Japan", "Rest of Asia Pacific"]
+      }],
+      "notes": "Reportable segments are geographic regions, not product categories."
+    },
+    {
+      "id": "apple-segments-paraphrase",
+      "question": "What geographic segments does Apple report in its 2025 annual report?",
+      "tickers": ["AAPL"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/apple/annual_report_2025.pdf",
+        "pages": [5, 50],
+        "required_terms": ["Americas", "Europe", "Greater China", "Japan", "Rest of Asia Pacific"]
+      }],
+      "notes": "Same expected evidence under different wording."
+    },
+    {
+      "id": "apple-product-revenue-categories",
+      "question": "Which product and services categories appear in Apple's disaggregated net sales table in its 2025 Form 10-K?",
+      "tickers": ["AAPL"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/apple/annual_report_2025.pdf",
+        "pages": [39],
+        "required_terms": ["iPhone", "Mac", "iPad", "Wearables, Home and Accessories", "Services", "209,586"]
+      }],
+      "notes": "Product/services revenue categories must not be confused with geographic reportable segments. The number anchors this to the table."
+    },
+    {
+      "id": "apple-employees",
+      "question": "How many full-time equivalent employees did Apple have according to its 2025 annual report?",
+      "tickers": ["AAPL"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/apple/annual_report_2025.pdf",
+        "pages": [7],
+        "required_terms": ["approximately 166,000", "full-time equivalent employees"]
+      }],
+      "notes": "Historical headcount as of September 27, 2025, not a current employee count."
+    },
+    {
+      "id": "apple-fiscal-calendar",
+      "question": "According to Apple's 2025 Form 10-K, when does its fiscal year end?",
+      "tickers": ["AAPL"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/apple/annual_report_2025.pdf",
+        "pages": [4, 24, 37],
+        "required_terms": ["52- or 53-week", "last Saturday of September"]
+      }],
+      "notes": "Accept any verified page that states the recurring fiscal-year rule."
+    },
+    {
+      "id": "apple-greater-china",
+      "question": "Which locations are included in Apple's Greater China segment according to its 2025 Form 10-K?",
+      "tickers": ["AAPL"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/apple/annual_report_2025.pdf",
+        "pages": [5, 50],
+        "required_terms": ["Greater China includes China mainland, Hong Kong and Taiwan"]
+      }],
+      "notes": "Requires the geographic definition, not a sales figure for the region."
+    },
+    {
+      "id": "quote-freshness-methodology",
+      "question": "What is the quote freshness methodology?",
+      "tickers": [],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "methodology.md",
+        "pages": [],
+        "required_terms": ["Yahoo Finance", "latest available closing price", "should not be described as a live price"]
+      }],
+      "notes": "A generic methodology question does not require a stock ticker or PDF."
+    },
+    {
+      "id": "microsoft-overview",
+      "question": "What are Microsoft's major business segments?",
+      "tickers": ["MSFT"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "microsoft.md",
+        "pages": [],
+        "required_terms": ["Productivity and Business Processes", "Intelligent Cloud", "More Personal Computing"]
+      }],
+      "notes": "Expected source is the current curated overview; no Microsoft annual report is in this corpus yet."
+    },
+    {
+      "id": "missing-apple-report-year",
+      "question": "According to Apple's 2023 Form 10-K, what are its reportable segments?",
+      "tickers": ["AAPL"],
+      "answerable": false,
+      "expected_evidence": [],
+      "notes": "Only the 2025 Apple report is currently present. References to 2023 inside that report do not satisfy this source request."
+    },
+    {
+      "id": "unsupported-exact-price-forecast",
+      "question": "What exact AAPL closing share price does Apple's 2025 Form 10-K predict for December 31, 2040?",
+      "tickers": ["AAPL"],
+      "answerable": false,
+      "expected_evidence": [],
+      "notes": "Strict retrieval-abstention case: the report supplies no such forecast. Returning related text fails the empty-result check but does not prove the answer model would invent a forecast."
+    }
+  ]
+}
