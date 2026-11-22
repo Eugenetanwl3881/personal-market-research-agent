@@ -249,6 +249,29 @@ def test_reference_context_failure_preserves_quote(monkeypatch):
     assert "Retriever unavailable." in result["errors"][-1]
 
 
+def test_graph_returns_missing_evidence_limit_without_answer_model(monkeypatch):
+    from market_research import answer as answer_module
+
+    configure_graph_dependencies(monkeypatch, {
+        "intent": "context", "ticker": ["AAPL"], "shares": None,
+        "needs_quote": False, "needs_news": False, "needs_context": True,
+    })
+    monkeypatch.setattr(graph_module, "search_knowledge", lambda question, **options: [])
+    monkeypatch.setattr(graph_module, "write_market_answer", answer_module.write_market_answer)
+
+    def forbidden_model():
+        raise AssertionError("The final answer must not invent missing report contents")
+
+    monkeypatch.setattr(answer_module, "create_model", forbidden_model)
+    result = graph_module.build_graph().invoke({
+        "question": "According to Apple's 2023 Form 10-K, what are its reportable segments?",
+    })
+    assert result["context_status"] == "no_results"
+    assert "cannot verify" in result["final_answer"]
+    assert "Americas" not in result["final_answer"]
+    assert result["steps"][-1] == "write_answer completed"
+
+
 def test_refused_advice_request_does_not_call_external_dependencies(monkeypatch):
     monkeypatch.setattr(
         graph_module,

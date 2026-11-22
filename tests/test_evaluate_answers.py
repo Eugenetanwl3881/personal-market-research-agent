@@ -88,14 +88,35 @@ def test_related_retrieval_can_fail_empty_check_while_answer_acknowledges_limits
 
 def test_static_limitations_and_disclaimer_do_not_satisfy_narrative_check(monkeypatch):
     dataset, retrieval_dataset = datasets("missing-apple-report-year")
-    mock_answer_model(monkeypatch, "Apple operates across several geographic regions.")
+
+    def writer_with_unsupported_narrative(state, stream_writer):
+        text = "Apple operates across several geographic regions."
+        stream_writer({"type": "answer_token", "text": text})
+        return text + "\nNo relevant reference documents were found."
+
     result = evaluate_answers(
-        dataset, retrieval_dataset, fake_retriever([]), write_market_answer,
+        dataset, retrieval_dataset, fake_retriever([]), writer_with_unsupported_narrative,
     )["results"][0]
 
     assert "No relevant reference documents were found" in result["final_answer"]
     assert result["checks"]["limitation_language_detected"] is False
     assert result["status"] == "flagged_review_required"
+
+
+def test_missing_report_evaluation_records_application_fallback_without_model(monkeypatch):
+    dataset, retrieval_dataset = datasets("missing-apple-report-year")
+
+    def forbidden_model():
+        raise AssertionError("Missing-report summary must not call the model")
+
+    monkeypatch.setattr("market_research.answer.create_model", forbidden_model)
+    report = evaluate_answers(dataset, retrieval_dataset, fake_retriever([]), write_market_answer)
+    result = report["results"][0]
+    assert result["status"] == "checks_passed_review_required"
+    assert result["narrative_source"] == "application"
+    assert "cannot verify" in result["narrative"]
+    assert report["summary"]["application_summaries"] == 1
+    assert "Summary source: `application`" in render_review(report)
 
 
 def test_disclaimer_plus_invented_price_is_flagged():

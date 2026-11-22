@@ -117,9 +117,11 @@ HF_HUB_OFFLINE=1 .venv/bin/python -m market_research.evaluate_answers
 
 Use offline mode only when the embedding model is cached. It prevents Hugging
 Face checks; the answer model still requires network access and a configured
-`OPENCODE_API_KEY`. Each of the three default cases makes one streamed answer
-request to the configured OpenCode model and may incur provider usage. No judge
-model is called. After reinstalling the editable package,
+`OPENCODE_API_KEY`. Model-written summaries make one streamed answer request
+each and may incur provider usage. The current default run uses the model for
+the supported segments and forecast cases; the empty-evidence missing-report
+case returns an application-written limitation without a summary-model call.
+No judge model is called. After reinstalling the editable package,
 `market-research-evaluate-answers` runs the same command.
 
 This evaluation directly reuses the existing retriever and `write_market_answer`
@@ -132,7 +134,8 @@ The runner saves two Git-ignored files:
 
 - `evaluations/results/answers_latest.json`: actual retrieved passages, the
   exact prepared reference excerpts, generated narrative and full answer,
-  mechanical checks, model/settings, latency, hashes, and pending review fields.
+  summary origin (`model` or `application`), mechanical checks, model/settings,
+  latency, hashes, and pending review fields.
 - `evaluations/results/answers_latest.md`: a readable comparison of each
   question, expectation, actual answer, and supplied evidence, with a review
   checklist. Start your review here.
@@ -153,10 +156,10 @@ the other automatically.
 
 The automated checks look for:
 
-- A nonempty model-written narrative.
+- A nonempty answer summary, written by the model or the application.
 - The required region names, supporting retrieved evidence, and a rendered
   expected reference for the supported case.
-- Limitation language in the model-written narrative for unsupported cases.
+- Limitation language in the answer summary for unsupported cases.
   Python's static limitations section and disclaimer cannot satisfy this check.
 - Currency amounts that deserve inspection in the forecast case.
 
@@ -193,5 +196,28 @@ answers still require human review. Inspection of that run found:
   excerpts do not establish one.
 
 These observations establish a baseline, not a guarantee of how another model
-run will behave. The next production improvement is to address unsupported
-answers when reference evidence is empty, then rerun these same cases.
+run will behave.
+
+### After the empty-evidence fix
+
+The original `answers_latest.*` files were preserved for comparison. A run
+after the fix is saved in `evaluations/results/answers_after_empty_evidence.*`.
+All three cases passed their automated checks, with one application-written
+summary. The missing-report summary now states that relevant evidence could
+not be retrieved and the requested reference information cannot be verified.
+The forecast answer also limits its statement to the supplied excerpts.
+
+The application now bypasses summary generation when reference context was
+requested but no usable excerpts were found. Whitespace-only excerpts count
+as absent. Retrieval errors produce a different limitation message. Mixed
+requests still render available quotes/calculations and can summarize news.
+No missing report contents are supplied by a model in this fallback path.
+
+These three answer cases are a small starting set: one supported control,
+one missing-source case, and one unsupported prediction. Each model-written
+answer costs a provider request and human review time. Broader coverage is
+still needed for irrelevant or incomplete evidence, multiple reports, and
+misleading claims inside otherwise plausible answers. Ordinary regression tests
+already cover blank/error evidence, streaming, mixed requests, and the graph
+path without using live services. Passing this set does not establish general
+answer correctness.

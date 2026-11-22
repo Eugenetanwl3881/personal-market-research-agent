@@ -202,6 +202,11 @@ Python renders predictable, data-sensitive sections:
 
 The language model writes only the narrative summary and news summaries. Quotes, sources, arithmetic, timestamps, and disclaimers are rendered by application code. News excerpts are treated as untrusted data and explicitly delimited in the model prompt; instructions inside articles are ignored.
 
+If reference context is requested but no usable excerpts are retrieved, Python
+writes a limitation summary directly and skips the summary-model call. It
+distinguishes retrieval failure from no matching evidence. Available quotes,
+calculations, and news still appear for mixed requests.
+
 ## Testing
 
 Run the test suite with:

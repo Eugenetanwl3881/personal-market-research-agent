@@ -71,7 +71,7 @@ class AnswerDataset(EvaluationModel):
 
 
 def check_answer_signals(case: AnswerCase, narrative: str) -> dict:
-    """Check the model-written narrative, excluding Python's static disclaimer."""
+    """Check the answer summary, excluding appended limitations/disclaimers."""
     normalized = normalize_evidence(narrative).replace("’", "'")
     checks = {"nonempty_narrative": bool(normalized)}
     missing_terms = [term for term in case.required_terms
@@ -132,15 +132,24 @@ def evaluate_answers(
                 "context": context, "context_status": "ok" if context else "no_results",
             }
             narrative_parts = []
+            narrative_sources = set()
 
             def capture_narrative(event):
                 if event.get("type") == "answer_token":
                     narrative_parts.append(event["text"])
+                    narrative_sources.add("model")
+                elif event.get("type") == "answer_section" and event.get("section") == "summary":
+                    narrative_parts.append(event["text"])
+                    narrative_sources.add(event.get("origin", "application"))
 
             started = perf_counter()
             result["final_answer"] = answer_writer(state, stream_writer=capture_narrative)
             result["answer_seconds"] = round(perf_counter() - started, 4)
             result["narrative"] = "".join(narrative_parts).strip()
+            result["narrative_source"] = (
+                next(iter(narrative_sources)) if len(narrative_sources) == 1
+                else "mixed" if narrative_sources else "unknown"
+            )
             signals = check_answer_signals(case, result["narrative"])
             if retrieval_case.answerable:
                 signals["checks"]["expected_evidence_retrieved"] = (
@@ -180,6 +189,7 @@ def evaluate_answers(
             "flagged": sum(r["status"] == "flagged_review_required" for r in results),
             "errors": sum(r["status"] == "error" for r in results),
             "human_reviews_pending": sum(r["status"] != "error" for r in results),
+            "application_summaries": sum(r.get("narrative_source") == "application" for r in results),
         },
         "results": results,
     }
@@ -189,7 +199,8 @@ def render_review(report: dict) -> str:
     """Create a readable companion report for inspecting claims and evidence."""
     lines = ["# Final-answer evaluation review", "",
              "Automated checks are signals, not correctness grades. Human review is pending.",
-             "The answer model was given the normal question and evidence, not the expected answer.", ""]
+             "Model-written summaries receive the normal question and evidence, not expectations.",
+             "Application-written summaries bypass the answer model when reference evidence is missing.", ""]
     for result in report["results"]:
         lines.extend([f"## {result['id']}", "", f"Question: {result['question']}", "",
                       f"Expected behavior: {result['expectations']['expected_behavior']}", "",
@@ -201,14 +212,15 @@ def render_review(report: dict) -> str:
             lines.extend(["### Automated signals", ""])
             lines.extend(f"- {'OK' if value else 'FLAG'}: {name}" for name, value in result["checks"].items())
             lines.extend(["", "### Generated answer", "", result["final_answer"], "",
-                          "### Exact reference excerpts sent to the model", ""])
+                          f"Summary source: `{result.get('narrative_source', 'unknown')}`", "",
+                          "### Prepared reference evidence", ""])
             for evidence in result["reference_evidence"]:
                 label = evidence["source"]
                 if "page_number" in evidence:
                     label += f", PDF page {evidence['page_number']}"
                 lines.extend([f"Source: {label}", "", "> " + evidence["content"], ""])
             if not result["reference_evidence"]:
-                lines.extend(["No reference excerpts were supplied.", ""])
+                lines.extend(["No reference excerpts were available.", ""])
         lines.extend(["### Human review", "", "Verdict: pending", ""])
         lines.extend(f"- [ ] {question}" for question in result["expectations"]["review_questions"])
         lines.extend(["", "Notes:", ""])

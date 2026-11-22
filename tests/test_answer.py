@@ -1,11 +1,80 @@
 from types import SimpleNamespace
 
+import pytest
+
 from market_research.answer import (
     create_model,
     prepare_news_evidence,
     prepare_reference_evidence,
     write_market_answer,
 )
+
+
+@pytest.mark.parametrize(
+    ("context", "status"),
+    [([], "no_results"), ([], "error"), ([], None),
+     ([{"source": "empty.pdf", "content": " \n\t "}], "ok")],
+)
+def test_missing_reference_evidence_bypasses_answer_model_and_streams_limit(monkeypatch, context, status):
+    def forbidden_model():
+        raise AssertionError("Missing evidence must not call the answer model")
+
+    monkeypatch.setattr("market_research.answer.create_model", forbidden_model)
+    events = []
+    answer = write_market_answer({
+        "question": "What does Apple's 2023 report say about its segments?",
+        "needs_context": True, "context": context, "context_status": status,
+    }, stream_writer=events.append)
+
+    assert "cannot verify" in answer
+    assert "Americas" not in answer
+    assert "## Reference sources" not in answer
+    assert not any(event["type"] == "answer_token" for event in events)
+    summary = next(event for event in events if event.get("section") == "summary")
+    assert summary["origin"] == "application"
+    assert "cannot verify" in summary["text"]
+    assert "".join(event["text"] for event in events).strip() == answer
+    if status == "error":
+        assert "retrieval failed" in answer
+        assert "No relevant reference documents were found" not in answer
+    else:
+        assert "No relevant reference documents were found" in answer
+
+
+def test_missing_context_keeps_available_quote_and_calculation(monkeypatch):
+    def forbidden_model():
+        raise AssertionError("A quote cannot justify inventing missing report contents")
+
+    monkeypatch.setattr("market_research.answer.create_model", forbidden_model)
+    answer = write_market_answer({
+        "question": "What are Apple's 2023 segments and how much would 15 shares cost?",
+        "needs_context": True, "needs_quote": True, "context": [],
+        "quote": {"AAPL": {"price": 100.0, "currency": "USD"}},
+        "shares": 15, "calculation": "AAPL: 15 shares × $100.00 = $1500.00",
+    })
+    assert "cannot verify" in answer
+    assert "**AAPL**: 100.00 USD" in answer
+    assert "15 shares × $100.00 = $1500.00" in answer
+
+
+def test_missing_context_still_allows_news_summarization(monkeypatch):
+    prompts = []
+
+    class Model:
+        def stream(self, prompt):
+            prompts.append(prompt)
+            assert "<news_evidence>" in prompt
+            yield SimpleNamespace(content="1. Apple reported a product announcement.")
+
+    monkeypatch.setattr("market_research.answer.create_model", lambda: Model())
+    answer = write_market_answer({
+        "question": "What are Apple's 2023 segments and its recent news?",
+        "needs_context": True, "needs_news": True, "context": [],
+        "news": [{"title": "Product announcement", "content": "Apple reported a product announcement."}],
+    })
+    assert "cannot verify" in answer
+    assert "Apple reported a product announcement" in answer
+    assert len(prompts) == 1
 
 
 def test_create_model_sends_opencode_session_header(monkeypatch):
