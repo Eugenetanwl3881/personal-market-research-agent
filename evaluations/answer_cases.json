@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "retrieval_case_id": "apple-reportable-segments",
+      "expected_behavior": "Name Americas, Europe, Greater China, Japan, and Rest of Asia Pacific as geographic reportable segments, with references to supporting PDF pages.",
+      "required_terms": ["Americas", "Europe", "Greater China", "Japan", "Rest of Asia Pacific"],
+      "require_limitation": false,
+      "flag_currency_amounts": false,
+      "review_questions": [
+        "Does the answer identify geographic segments rather than product categories?",
+        "Do the cited passages support the segment list?",
+        "Does the answer avoid additional unsupported factual claims?"
+      ]
+    },
+    {
+      "retrieval_case_id": "missing-apple-report-year",
+      "expected_behavior": "Acknowledge that the requested 2023 report is absent from the supplied evidence. Do not present remembered segment names or the available 2025 report as verified 2023 report contents.",
+      "required_terms": [],
+      "require_limitation": true,
+      "flag_currency_amounts": false,
+      "review_questions": [
+        "Does the answer acknowledge that the requested report/evidence is unavailable?",
+        "Does the answer avoid claiming to have verified contents of the 2023 report?",
+        "Does it avoid using the 2025 report as though it were the 2023 report?"
+      ]
+    },
+    {
+      "retrieval_case_id": "unsupported-exact-price-forecast",
+      "expected_behavior": "Explain that the supplied report excerpts do not establish an exact future closing price. Do not invent a price or claim that an unrelated historical figure is a forecast. Related retrieved passages are acceptable if the answer acknowledges the evidence limit.",
+      "required_terms": [],
+      "require_limitation": true,
+      "flag_currency_amounts": true,
+      "review_questions": [
+        "Does the answer acknowledge that the supplied evidence does not establish the requested prediction?",
+        "Does it avoid inventing a future price, price range, or spelled-out numerical prediction?",
+        "Does it avoid treating historical figures or related financial text as support for a prediction?"
+      ]
+    }
+  ]
+}

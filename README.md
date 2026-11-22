@@ -226,6 +226,19 @@ data APIs. Results and retrieved evidence are saved to the Git-ignored
 for metrics and known baseline failures. It checks retrieval directly; it does
 not evaluate request parsing or final-answer quality.
 
+To generate final answers for the three evidence-sufficiency cases and prepare
+a human review, run:
+
+```bash
+python -m market_research.evaluate_answers
+```
+
+This calls your configured OpenCode model. It saves actual answers, evidence,
+and automated review signals to `evaluations/results/answers_latest.json`, plus
+a readable `answers_latest.md` review checklist. Automated signals are not
+correctness grades; review the full answers against their evidence. See the
+[evaluation guide](evaluations/README.md#final-answer-evaluation) for details.
+
 ## Current limitations
 
 - Prices are latest available closes, not guaranteed live prices.

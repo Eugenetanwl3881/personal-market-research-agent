@@ -101,3 +101,97 @@ case fails, and 2 for setup/configuration errors. A status of 1 for the initial
 baseline is expected. Ordinary unit tests separately check evaluation scoring
 and verify that answerable labels exist in the original source pages, without
 running embeddings or an answer model.
+
+## Final-answer evaluation
+
+`answer_cases.json` defines expectations and review questions for three cases:
+the supported Apple segments question, the missing 2023 report, and the
+unsupported exact future-price forecast. Each references a question from
+`retrieval_cases.json` so the wording and retrieval labels stay consistent.
+
+Run:
+
+```bash
+HF_HUB_OFFLINE=1 .venv/bin/python -m market_research.evaluate_answers
+```
+
+Use offline mode only when the embedding model is cached. It prevents Hugging
+Face checks; the answer model still requires network access and a configured
+`OPENCODE_API_KEY`. Each of the three default cases makes one streamed answer
+request to the configured OpenCode model and may incur provider usage. No judge
+model is called. After reinstalling the editable package,
+`market-research-evaluate-answers` runs the same command.
+
+This evaluation directly reuses the existing retriever and `write_market_answer`
+with labelled tickers and reference-only request state. It isolates the final
+answer stage: it does not exercise graph routing, scope guardrails, request
+parsing, live quote/news retrieval, or graph fallback answers. Expectations and
+review questions are never sent to the answer model.
+
+The runner saves two Git-ignored files:
+
+- `evaluations/results/answers_latest.json`: actual retrieved passages, the
+  exact prepared reference excerpts, generated narrative and full answer,
+  mechanical checks, model/settings, latency, hashes, and pending review fields.
+- `evaluations/results/answers_latest.md`: a readable comparison of each
+  question, expectation, actual answer, and supplied evidence, with a review
+  checklist. Start your review here.
+
+The default filenames are overwritten on the next run. Keep a baseline or
+completed review with a different output name, for example:
+
+```bash
+HF_HUB_OFFLINE=1 .venv/bin/python -m market_research.evaluate_answers \
+  --output evaluations/results/answers_baseline.json
+```
+
+The `.md` companion uses the same output stem. The JSON and Markdown are review
+artifacts, not a synchronized review application; edits in one do not update
+the other automatically.
+
+### Automated signals and human review
+
+The automated checks look for:
+
+- A nonempty model-written narrative.
+- The required region names, supporting retrieved evidence, and a rendered
+  expected reference for the supported case.
+- Limitation language in the model-written narrative for unsupported cases.
+  Python's static limitations section and disclaimer cannot satisfy this check.
+- Currency amounts that deserve inspection in the forecast case.
+
+Results are `checks_passed_review_required`, `flagged_review_required`, or
+`error`. Neither of the first two is a final correctness verdict. A limitation
+phrase can coexist with an invented claim; a spelled-out prediction can evade
+the currency detector; and a valid paraphrase can fail a language pattern.
+Review the whole answer and whether each claim is supported by its evidence.
+
+The old retrieval empty-result check is recorded separately. An unanswerable
+case can fail that strict retrieval check yet produce an appropriate answer
+acknowledging that the retrieved text does not establish a prediction.
+
+Exit code 0 means the automated signals passed with no execution errors;
+human review is still required. Exit code 1 means at least one case was flagged
+or could not run. Exit code 2 means setup/configuration failed. Provider errors
+are recorded as errors, never as successful abstentions. Ordinary tests mock
+answer generation and do not spend model credits.
+
+### First live answer run
+
+Two cases passed the automated checks and one was flagged; all generated
+answers still require human review. Inspection of that run found:
+
+- The supported answer listed all five geographic segments and displayed a
+  reference to PDF page 50.
+- The missing-2023-report answer claimed contents of the 2023 report despite
+  receiving no reference excerpts. It did not acknowledge the evidence gap in
+  its narrative. This is an actual unsupported-answer failure, even though
+  Python appended a static "No relevant reference documents were found" line.
+- The future-price answer provided no numerical prediction and passed the
+  limitation-language check. Review its scope carefully: saying that the whole
+  report contains no prediction is stronger than saying that the supplied
+  excerpts do not establish one.
+
+These observations establish a baseline, not a guarantee of how another model
+run will behave. The next production improvement is to address unsupported
+answers when reference evidence is empty, then rerun these same cases.

@@ -17,6 +17,7 @@
 - Standalone `market-research-index` command for explicit knowledge ingestion.
 - Deterministic RAG retrieval evaluation cases for company, methodology, and ticker filtering.
 - Real-embedding retrieval evaluation command with ten labelled cases, saved evidence, and baseline metrics.
+- Final-answer evaluation runner with three evidence-sufficiency cases, mechanical review signals, and saved answer/evidence review reports.
 - Richer sectioned company and methodology documents with review/version metadata.
 - Page-aware PDF ingestion with required YAML sidecar metadata.
 - Hybrid BM25/vector retrieval with company/report-year filtering, PDF margin cleanup, and neighboring context.
