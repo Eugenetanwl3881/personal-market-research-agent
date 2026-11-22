@@ -128,7 +128,8 @@ def _metadata_for_apple_report(report_year: int, source_url: str) -> dict[str, A
         "source_name": f"Apple {report_year} Form 10-K Annual Report",
         "source_url": source_url,
         "last_reviewed": date.today().isoformat(),
-        "document_version": str(report_year),
+        "fiscal_year": report_year,
+        "document_version": "1",
     }
     validated = KnowledgeDocumentMetadata(**metadata)
     return validated.model_dump(mode="json", exclude_none=True)

@@ -54,7 +54,8 @@ def test_fetch_apple_report_writes_pdf_and_validated_sidecar(tmp_path: Path):
         "source_name": "Apple 2025 Form 10-K Annual Report",
         "source_url": APPLE_REPORT_URL_TEMPLATE.format(year=2025),
         "last_reviewed": date.today().isoformat(),
-        "document_version": "2025",
+        "fiscal_year": 2025,
+        "document_version": "1",
     }
 
 

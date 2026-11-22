@@ -57,6 +57,12 @@ Check labels against the source text before interpreting failures. Update the
 cases deliberately when the corpus changes; for example, adding Apple's 2023
 report changes the missing-report case's premise.
 
+Annual-report source metadata uses `fiscal_year: 2025` (an integer) for year
+filtering and a separate `document_version: "1"` for revision identity. Tests
+include a 2024 report with revision `"2025"` to verify that a 2025 question
+cannot select it by mistaking the revision for the fiscal year. Metadata changes
+alter the index signature, so keep previous evaluation runs when migrating.
+
 ## Read the metrics
 
 For answerable questions:

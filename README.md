@@ -39,7 +39,7 @@ The knowledge base is stored in `knowledge/` as Markdown with YAML frontmatter a
 
 Retrieval combines up to 20 vector candidates with up to 20 BM25 keyword candidates, using reciprocal rank fusion to return at most two passages. Keyword ranks have twice the weight of vector ranks. The cosine threshold of 0.45 applies to vector candidates; keyword matches can recover passages missed by vector search. These scores rank evidence and are not probabilities that an answer is correct. Keyword scoring scans the loaded chunks locally, which suits the current small corpus.
 
-Both searches filter by ticker, retaining generic untickered documents. An explicit annual-report/10-K reference adds a document-type filter; a single year in that request also filters `document_version` (annual-report sidecars should use the report year there). Within that scope, the search focuses on the topic rather than repeating company and report identifiers. PDF loading strips repeated margin lines, and each selected PDF chunk includes at most one neighboring chunk on either side from the same page. References display the PDF page number, which can differ from the report's printed page number.
+Both searches filter by ticker, retaining generic untickered documents. An explicit annual-report/10-K reference adds a document-type filter; a single year in that request also filters the integer `fiscal_year` metadata field. `document_version` is a separate revision label, such as `"1"` or `"1.1"`, and is never used as the report year. Within that scope, the search focuses on the topic rather than repeating company and report identifiers. PDF loading strips repeated margin lines, and each selected PDF chunk includes at most one neighboring chunk on either side from the same page. References display the PDF page number, which can differ from the report's printed page number.
 
 Company documents declare metadata explicitly:
 
@@ -183,8 +183,20 @@ source_name: Apple Investor Relations
 source_url: https://example.com/apple-report.pdf
 published_date: 2025-10-31
 last_reviewed: 2026-09-26
-document_version: "2025"
+fiscal_year: 2025
+document_version: "1"
 ```
+
+Annual reports require an explicit integer `fiscal_year` between 1900 and 2099
+(the year range currently recognized in requests). This is the year covered
+by the report, which may differ from its publication year. General company
+overviews and methodology documents may omit it. Existing annual-report
+frontmatter or sidecars using `document_version: "2025"` must add
+`fiscal_year: 2025`; revise the version label independently. The loader does
+not infer a fiscal year from the revision label, filename, or publication date.
+Metadata changes trigger the normal index rebuild automatically; the current
+implementation rebuilds the whole collection once rather than updating only
+metadata. The original PDF does not need to be downloaded again.
 
 The loader creates one document per non-empty PDF page and preserves `page_number`, `page_count`, `source`, and `source_format` metadata. Run `market-research-index --force` after adding or changing a PDF. Scanned image-only PDFs are not supported yet because they require OCR.
 

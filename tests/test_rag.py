@@ -10,8 +10,10 @@ from pypdf.generic import (
     DictionaryObject,
     NameObject,
 )
+from pydantic import ValidationError
 
 from market_research.rag import (
+    KnowledgeDocumentMetadata,
     ScoreThresholdRetriever,
     build_knowledge_retriever,
     ingest_knowledge_base,
@@ -25,7 +27,7 @@ def test_hybrid_recovers_segment_answer_outside_vector_candidates():
     """Exact filing terms recover evidence even when vectors prefer certificates."""
     metadata = {
         "ticker_scope": "AAPL", "company": "Apple Inc.",
-        "document_type": "annual_report", "document_version": "2025",
+        "document_type": "annual_report", "fiscal_year": 2025, "document_version": "1",
         "source": "apple_2025.pdf", "source_format": "pdf", "page_number": 50,
     }
     answer = Document(
@@ -86,9 +88,11 @@ def test_hybrid_expands_split_pdf_passage_without_crossing_pages():
 
 def test_hybrid_filters_company_and_report_year_in_both_searches(tmp_path: Path):
     for ticker, year in [("AAPL", "2025"), ("AAPL", "2024"), ("MSFT", "2025")]:
+        revision = "2025" if year == "2024" else "1"
         (tmp_path / f"{ticker}_{year}.md").write_text(
             f"---\nticker: {ticker}\ndocument_type: annual_report\n"
-            f'document_version: "{year}"\n---\n'
+            f'fiscal_year: {year}\n'
+            f'document_version: "{revision}"\n---\n'
             f"{ticker} reportable segments for {year}.", encoding="utf-8",
         )
     embeddings = CountingEmbeddings()
@@ -99,14 +103,39 @@ def test_hybrid_filters_company_and_report_year_in_both_searches(tmp_path: Path)
     results = retriever.invoke("What are AAPL's reportable segments in its 2025 Form 10-K?")
 
     assert [doc.metadata["source"] for doc in results] == ["AAPL_2025.md"]
+    assert results[0].metadata["fiscal_year"] == 2025
+    assert results[0].metadata["document_version"] == "1"
+    assert retriever._report_scope("Apple's 2025 Form 10-K") == {
+        "document_type": "annual_report", "fiscal_year": 2025,
+    }
     assert embeddings.query_calls == 1
     assert retriever.invoke("What are AAPL's segments in its 2023 annual report?") == []
+
+
+def test_annual_report_requires_fiscal_year_independent_of_revision():
+    with pytest.raises(ValidationError, match="annual_report metadata requires fiscal_year"):
+        KnowledgeDocumentMetadata(document_type="annual_report", document_version="2025")
+
+    metadata = KnowledgeDocumentMetadata(
+        document_type="annual_report", fiscal_year=2025, document_version="1.1",
+    )
+    assert metadata.model_dump(mode="json")["fiscal_year"] == 2025
+    assert metadata.document_version == "1.1"
+    assert KnowledgeDocumentMetadata(document_type="methodology").fiscal_year is None
+
+
+@pytest.mark.parametrize("year", ["2025", True, 2025.5, 1899, 2100])
+def test_fiscal_year_rejects_non_integer_or_unsupported_years(year):
+    with pytest.raises(ValidationError, match="fiscal_year"):
+        KnowledgeDocumentMetadata(document_type="annual_report", fiscal_year=year)
 
 
 def test_pdf_loader_removes_repeated_margins_but_keeps_page_numbers(tmp_path: Path, monkeypatch):
     pdf_path = tmp_path / "report.pdf"
     pdf_path.touch()
-    pdf_path.with_suffix(".yaml").write_text("document_type: annual_report\n", encoding="utf-8")
+    pdf_path.with_suffix(".yaml").write_text(
+        "document_type: annual_report\nfiscal_year: 2025\n", encoding="utf-8",
+    )
     pages = [SimpleNamespace(extract_text=lambda n=n: f"Body for page {n}.\nApple Inc. | 2025 Form 10-K | {n}")
              for n in range(1, 5)]
     monkeypatch.setattr("pypdf.PdfReader", lambda path: SimpleNamespace(pages=pages))
@@ -267,7 +296,8 @@ def test_load_knowledge_documents_extracts_pdf_pages_with_sidecar_metadata(
         "source_url: https://example.com/apple-report.pdf\n"
         "published_date: 2026-01-15\n"
         "last_reviewed: 2026-09-26\n"
-        "document_version: \"2025\"\n",
+        "fiscal_year: 2025\n"
+        "document_version: \"1\"\n",
         encoding="utf-8",
     )
 
@@ -283,6 +313,8 @@ def test_load_knowledge_documents_extracts_pdf_pages_with_sidecar_metadata(
     assert all(document.metadata["source_format"] == "pdf" for document in documents)
     assert documents[0].metadata["ticker_scope"] == "AAPL"
     assert documents[0].metadata["published_date"] == "2026-01-15"
+    assert all(document.metadata["fiscal_year"] == 2025 for document in documents)
+    assert all(document.metadata["document_version"] == "1" for document in documents)
 
 
 def test_load_knowledge_documents_requires_pdf_sidecar(tmp_path: Path):

@@ -12,7 +12,7 @@ from typing import Any
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.retrievers import BaseRetriever
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 DEFAULT_KNOWLEDGE_DIR = (
@@ -117,7 +117,17 @@ class KnowledgeDocumentMetadata(BaseModel):
     source_name: str | None = None
     published_date: date | None = None
     last_reviewed: date | None = None
+    fiscal_year: int | None = Field(default=None, strict=True, ge=1900, le=2099)
     document_version: str | None = None
+
+    @model_validator(mode="after")
+    def require_annual_report_year(self):
+        if self.document_type == "annual_report" and self.fiscal_year is None:
+            raise ValueError(
+                "annual_report metadata requires fiscal_year (an integer such as 2025); "
+                "document_version is a separate revision label."
+            )
+        return self
 
     @field_validator("ticker")
     @classmethod
@@ -141,14 +151,14 @@ class ScoreThresholdRetriever(BaseRetriever):
     candidate_k: int = DEFAULT_CANDIDATE_K
     keyword_documents: list[Document] = Field(default_factory=list)
 
-    def _report_scope(self, query: str) -> dict[str, str]:
+    def _report_scope(self, query: str) -> dict[str, str | int]:
         """Treat an explicit annual report and year as source constraints."""
         if not re.search(ANNUAL_REPORT_PATTERN, query, re.IGNORECASE):
             return {}
-        scope = {"document_type": "annual_report"}
+        scope: dict[str, str | int] = {"document_type": "annual_report"}
         years = set(re.findall(r"\b(?:19|20)\d{2}\b", query))
         if len(years) == 1:
-            scope["document_version"] = years.pop()
+            scope["fiscal_year"] = int(years.pop())
         return scope
 
     def _metadata_filter(self, query: str = "") -> dict[str, Any] | None:
@@ -178,7 +188,7 @@ class ScoreThresholdRetriever(BaseRetriever):
         topic = query
         if scope:
             topic = re.sub(ANNUAL_REPORT_PATTERN, " ", topic, flags=re.IGNORECASE)
-            identity_terms.add(scope.get("document_version", ""))
+            identity_terms.add(str(scope.get("fiscal_year", "")))
         terms = [term for term in _keyword_tokens(topic) if term not in identity_terms]
         return " ".join(terms) or query
 
