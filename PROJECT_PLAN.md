@@ -18,6 +18,7 @@
 - Deterministic RAG retrieval evaluation cases for company, methodology, and ticker filtering.
 - Richer sectioned company and methodology documents with review/version metadata.
 - Page-aware PDF ingestion with required YAML sidecar metadata.
+- Automated Apple annual-report download with generated and validated sidecar metadata.
 - Reference evidence passed to the answer model with source labels.
 - Graph-step and token-level hybrid streaming in the CLI.
 - Mocked tests for normal and failure scenarios.
@@ -25,7 +26,7 @@
 ## Next improvements
 
 1. Improve news relevance and source-quality ranking.
-2. Add automated official-filing discovery/download and refresh with page citations.
+2. Expand official-filing discovery/download to other issuers and add page citations to answers.
 3. Add clearer multi-ticker comparison output, including optional calculated differences.
 4. Add retries, timeouts, and observability for external providers.
 5. Add optional Hugging Face authentication (`HF_TOKEN`) for higher rate limits

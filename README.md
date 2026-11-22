@@ -135,6 +135,31 @@ The equivalent module command is:
 python -m market_research.ingest
 ```
 
+Download the latest available Apple annual report automatically:
+
+```bash
+market-research-fetch --ticker AAPL
+```
+
+The current Apple source adapter tries recent official investor-relations
+annual-report PDFs and writes both the PDF and a validated YAML sidecar under
+`knowledge/raw/apple/`. To fetch a specific year, use `--year`, and use
+`--force` to replace an existing local copy:
+
+```bash
+market-research-fetch --ticker AAPL --year 2025
+market-research-fetch --ticker AAPL --year 2025 --force
+```
+
+After downloading a report, refresh the persistent index:
+
+```bash
+market-research-index --force
+```
+
+The downloader is intentionally source-specific for now. Apple is the first
+adapter; other issuers can be added without changing the PDF loader.
+
 Use `--force` or `--force-rebuild` to rebuild even when the existing index is current. You can override the source and output locations with `--knowledge-dir` and `--index-dir`. Research queries still check the index automatically, so explicit ingestion is optional but useful when preparing a deployment or verifying the knowledge base.
 
 PDF files can be placed anywhere below the knowledge directory. Each PDF requires a same-named YAML sidecar because PDFs do not contain the project’s frontmatter format:
