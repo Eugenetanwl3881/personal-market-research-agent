@@ -2,15 +2,17 @@ import hashlib
 import json
 import os
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
+from math import log
 from pathlib import Path
 from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.retrievers import BaseRetriever
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 DEFAULT_KNOWLEDGE_DIR = (
@@ -20,9 +22,60 @@ DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_PERSIST_DIRECTORY = Path(__file__).resolve().parents[2] / ".rag_index"
 DEFAULT_COLLECTION_NAME = "market_research_knowledge"
 DEFAULT_RETRIEVAL_K = 2
+DEFAULT_CANDIDATE_K = 20
 DEFAULT_RELEVANCE_THRESHOLD = 0.45
 INDEX_VERSION = 1
 GENERIC_TICKER_SCOPE = "__generic__"
+
+# Common question words add noise to keyword matching. Keep content words,
+# including numbers and filing terms, so this also works beyond annual reports.
+KEYWORD_STOP_WORDS = frozenset(
+    "a an and are as at be by can do does for from how i in is it its of on or "
+    "s say says that the their this to was were what when where which who will "
+    "with would according please tell me about".split()
+)
+ANNUAL_REPORT_PATTERN = r"\b(?:form\s+)?10[\s-]?k\b|\bannual\s+report\b"
+
+
+def _keyword_tokens(text: str) -> list[str]:
+    """Tokenize prose for local keyword retrieval without model calls."""
+    return [
+        token for token in re.findall(r"[a-z0-9]+", text.lower())
+        if token not in KEYWORD_STOP_WORDS
+    ]
+
+
+def _keyword_search(
+    query: str, documents: list[Document], k: int,
+) -> list[tuple[Document, float]]:
+    """Rank chunks with BM25, favoring rare terms over repeated boilerplate."""
+    query_terms = sorted(set(_keyword_tokens(query)))
+    if not documents or not query_terms:
+        return []
+    counts = [Counter(_keyword_tokens(doc.page_content)) for doc in documents]
+    lengths = [sum(count.values()) for count in counts]
+    average_length = sum(lengths) / len(lengths) or 1
+    document_frequencies = Counter(
+        term for count in counts for term in query_terms if term in count
+    )
+    matches = []
+    for document, frequencies, length in zip(documents, counts, lengths):
+        score = 0.0
+        for term in query_terms:
+            frequency = frequencies[term]
+            if not frequency:
+                continue
+            document_frequency = document_frequencies[term]
+            inverse_frequency = log(
+                1 + (len(documents) - document_frequency + 0.5)
+                / (document_frequency + 0.5)
+            )
+            score += inverse_frequency * frequency * 2.5 / (
+                frequency + 1.5 * (0.25 + 0.75 * length / average_length)
+            )
+        if score > 0:
+            matches.append((document, score))
+    return sorted(matches, key=lambda match: match[1], reverse=True)[:k]
 
 
 @dataclass(frozen=True)
@@ -79,50 +132,143 @@ class KnowledgeDocumentMetadata(BaseModel):
 
 
 class ScoreThresholdRetriever(BaseRetriever):
-    """Retrieve only top-ranked chunks whose cosine score is high enough."""
+    """Combine vector and keyword rankings over ticker-filtered chunks."""
 
     vector_store: Any
     k: int = DEFAULT_RETRIEVAL_K
     score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD
     tickers: list[str] | None = None
+    candidate_k: int = DEFAULT_CANDIDATE_K
+    keyword_documents: list[Document] = Field(default_factory=list)
 
-    def _metadata_filter(self) -> dict[str, Any] | None:
-        """Build a Chroma filter for requested and generic documents."""
-        if not self.tickers:
-            return None
+    def _report_scope(self, query: str) -> dict[str, str]:
+        """Treat an explicit annual report and year as source constraints."""
+        if not re.search(ANNUAL_REPORT_PATTERN, query, re.IGNORECASE):
+            return {}
+        scope = {"document_type": "annual_report"}
+        years = set(re.findall(r"\b(?:19|20)\d{2}\b", query))
+        if len(years) == 1:
+            scope["document_version"] = years.pop()
+        return scope
 
-        return {
-            "$or": [
+    def _metadata_filter(self, query: str = "") -> dict[str, Any] | None:
+        """Apply the same ticker/report constraints as keyword retrieval."""
+        clauses: list[dict[str, Any]] = []
+        if self.tickers:
+            clauses.append({"$or": [
                 *({"ticker_scope": ticker} for ticker in self.tickers),
                 {"ticker_scope": GENERIC_TICKER_SCOPE},
-            ],
-        }
+            ]})
+        clauses.extend({key: value} for key, value in self._report_scope(query).items())
+        if not clauses:
+            return None
+        return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+
+    def _search_text(self, query: str, documents: list[Document]) -> str:
+        """Search the topic after company/report identity is scoped by metadata."""
+        scope = self._report_scope(query)
+        if not scope:
+            return query
+        identity_terms = set()
+        if self.tickers:
+            for doc in documents:
+                if doc.metadata.get("ticker_scope") in self.tickers:
+                    identity_terms.update(_keyword_tokens(doc.metadata.get("company", "")))
+            identity_terms.update(ticker.lower() for ticker in self.tickers)
+        topic = query
+        if scope:
+            topic = re.sub(ANNUAL_REPORT_PATTERN, " ", topic, flags=re.IGNORECASE)
+            identity_terms.add(scope.get("document_version", ""))
+        terms = [term for term in _keyword_tokens(topic) if term not in identity_terms]
+        return " ".join(terms) or query
+
+    def _expand_pdf_context(self, document: Document) -> Document:
+        """Include adjacent chunks from the same PDF page around a search hit.
+
+        A list or sentence can cross a chunk boundary. At most three original
+        chunks are joined, keeping evidence bounded and page metadata intact.
+        """
+        metadata = document.metadata
+        if metadata.get("source_format") != "pdf" or "start_index" not in metadata:
+            return document
+        page_chunks = sorted(
+            (chunk for chunk in self.keyword_documents
+             if chunk.metadata.get("source") == metadata.get("source")
+             and chunk.metadata.get("page_number") == metadata.get("page_number")),
+            key=lambda chunk: chunk.metadata["start_index"],
+        )
+        hit_index = next((i for i, chunk in enumerate(page_chunks)
+                          if chunk.metadata["start_index"] == metadata["start_index"]), None)
+        if hit_index is None:
+            return document
+        neighbors = page_chunks[max(0, hit_index - 1):hit_index + 2]
+        content = neighbors[0].page_content
+        start = neighbors[0].metadata["start_index"]
+        end = start + len(content)
+        for neighbor in neighbors[1:]:
+            offset = neighbor.metadata["start_index"]
+            content += ("\n" if offset > end else "") + neighbor.page_content[max(0, end - offset):]
+            end = offset + len(neighbor.page_content)
+        return Document(
+            id=document.id,
+            page_content=content,
+            metadata={**metadata, "start_index": start,
+                      "matched_start_index": metadata["start_index"]},
+        )
 
     def _get_relevant_documents(self, query: str) -> list[Document]:
-        """Search the vector store and discard weakly related chunks."""
+        """Fuse BM25 and vector candidates, then return at most k chunks.
+
+        Reciprocal rank fusion uses positions rather than comparing incompatible
+        BM25 and cosine scores. Keyword ranks have twice the weight to help
+        precise filing terms compete with semantically similar boilerplate.
+        The cosine threshold applies to vector candidates only; keyword search
+        can recover passages that vector search did not select.
+        """
+        allowed_scopes = {*self.tickers, GENERIC_TICKER_SCOPE} if self.tickers else None
+        report_scope = self._report_scope(query)
+        keyword_documents = [
+            doc for doc in self.keyword_documents
+            if (allowed_scopes is None
+                or doc.metadata.get("ticker_scope", GENERIC_TICKER_SCOPE) in allowed_scopes)
+            and all(doc.metadata.get(key) == value for key, value in report_scope.items())
+        ]
+        search_text = self._search_text(query, keyword_documents)
         matches = self.vector_store.similarity_search_with_relevance_scores(
-            query,
-            k=self.k,
-            filter=self._metadata_filter(),
+            search_text,
+            k=max(self.k, self.candidate_k),
+            filter=self._metadata_filter(query),
         )
-        relevant_documents = []
+        keyword_matches = _keyword_search(
+            search_text, keyword_documents, max(self.k, self.candidate_k),
+        )
+        candidates: dict[str, Document] = {}
+        scores: dict[str, float] = {}
+        evidence_scores: dict[str, dict[str, float]] = {}
+        for ranking, weight, score_name in (
+            ([(doc, score) for doc, score in matches if score >= self.score_threshold],
+             1.0, "relevance_score"),
+            (keyword_matches, 2.0, "keyword_score"),
+        ):
+            for rank, (document, score) in enumerate(ranking, start=1):
+                chunk_id = document.id or _stable_chunk_id(document)
+                candidates[chunk_id] = document
+                scores[chunk_id] = scores.get(chunk_id, 0.0) + weight / (60 + rank)
+                evidence_scores.setdefault(chunk_id, {})[score_name] = round(score, 4)
 
-        for document, score in matches:
-            if score < self.score_threshold:
-                continue
-
-            relevant_documents.append(
-                Document(
-                    id=document.id,
-                    page_content=document.page_content,
-                    metadata={
-                        **document.metadata,
-                        "relevance_score": round(score, 4),
-                    },
-                )
-            )
-
-        return relevant_documents
+        best_ids = sorted(scores, key=scores.get, reverse=True)[:self.k]
+        return [
+            self._expand_pdf_context(Document(
+                id=chunk_id,
+                page_content=candidates[chunk_id].page_content,
+                metadata={
+                    **candidates[chunk_id].metadata,
+                    **evidence_scores[chunk_id],
+                    "retrieval_score": round(scores[chunk_id], 6),
+                },
+            ))
+            for chunk_id in best_ids
+        ]
 
 
 def _index_manifest_path(
@@ -343,9 +489,31 @@ def _load_pdf_documents(pdf_path: Path, source_name: str) -> list[Document]:
     reader = PdfReader(str(pdf_path))
     page_count = len(reader.pages)
     documents = []
+    page_texts = [(page.extract_text() or "").strip() for page in reader.pages]
+    # Repeated first/last lines are typically running titles or page footers.
+    # Normalize page numbers for counting but preserve the original body text.
+    def margin_key(line: str) -> str:
+        normalized = " ".join(line.split())
+        if normalized.isdecimal():
+            return "#page"
+        return re.sub(r"(?<=\|)\s*\d+\s*$", " #page", normalized)
 
-    for page_number, page in enumerate(reader.pages, start=1):
-        page_content = (page.extract_text() or "").strip()
+    margin_counts: Counter[str] = Counter()
+    for text in page_texts:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        margin_counts.update({margin_key(line) for line in lines[:1] + lines[-1:]})
+    repeated_margins = {
+        key for key, count in margin_counts.items()
+        if count >= max(3, page_count * 0.2)
+    }
+
+    for page_number, text in enumerate(page_texts, start=1):
+        lines = text.splitlines()
+        while lines and (not lines[0].strip() or margin_key(lines[0]) in repeated_margins):
+            lines.pop(0)
+        while lines and (not lines[-1].strip() or margin_key(lines[-1]) in repeated_margins):
+            lines.pop()
+        page_content = "\n".join(lines).strip()
         if not page_content:
             continue
 
@@ -551,6 +719,7 @@ def build_knowledge_retriever(
     chunk_overlap: int = 100,
     k: int = DEFAULT_RETRIEVAL_K,
     score_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
+    candidate_k: int = DEFAULT_CANDIDATE_K,
     tickers: list[str] | None = None,
     persist_directory: str | Path | None = None,
     collection_name: str = DEFAULT_COLLECTION_NAME,
@@ -561,6 +730,8 @@ def build_knowledge_retriever(
         raise ValueError("k must be greater than zero.")
     if not 0 <= score_threshold <= 1:
         raise ValueError("score_threshold must be between zero and one.")
+    if candidate_k <= 0:
+        raise ValueError("candidate_k must be greater than zero.")
 
     requested_tickers = list(dict.fromkeys(
         ticker.strip().upper()
@@ -584,6 +755,15 @@ def build_knowledge_retriever(
         k=k,
         score_threshold=score_threshold,
         tickers=requested_tickers or None,
+        candidate_k=candidate_k,
+        keyword_documents=[
+            Document(
+                id=_stable_chunk_id(chunk),
+                page_content=chunk.page_content,
+                metadata=chunk.metadata,
+            )
+            for chunk in prepared.chunks
+        ],
     )
 
 

@@ -10,7 +10,7 @@
 - Latest available closing prices, with source, trading date, retrieval time, and freshness classification.
 - Share-cost calculations for a supplied positive quantity.
 - Recent finance-news retrieval with structured source information.
-- Two-step RAG retrieval over a small local Markdown knowledge base.
+- Two-step RAG retrieval over local Markdown and PDF documents, combining vector and keyword search.
 - Reference-source labels and grounded reference evidence in answer generation.
 - Scope guardrails for trade execution, unrelated questions, and personalized investment advice.
 - Partial answers when parsing, quote retrieval, news retrieval, or model generation fails.
@@ -82,7 +82,7 @@ final_answer
 steps
 ```
 
-`quote` holds one structured quote per ticker. Each quote includes price, currency, price type, trading date, retrieval time, freshness status, and source. `news` contains structured article fields: title, publisher, publication timestamp, URL, and content excerpt. Knowledge documents declare validated YAML frontmatter metadata such as ticker, company, document type, source URL, source name, review date, and document version. RAG context is limited to the highest-scoring chunks that pass the configured relevance threshold; company-specific retrieval also filters by ticker metadata while retaining generic untickered documents, and each chunk retains its retrieval score in metadata.
+`quote` holds one structured quote per ticker. Each quote includes price, currency, price type, trading date, retrieval time, freshness status, and source. `news` contains structured article fields: title, publisher, publication timestamp, URL, and content excerpt. Knowledge documents declare validated YAML frontmatter or sidecar metadata such as ticker, company, document type, source URL, source name, review date, and document version. RAG combines vector and BM25 keyword rankings and returns at most two passages. The cosine threshold applies to vector candidates; keyword evidence can recover passages missed by vector search. Both paths apply ticker and explicit annual-report/year filters. PDF hits include bounded neighboring context from the same page; page numbers are retained in evidence and shown in references.
 
 ## Component responsibilities
 

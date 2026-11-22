@@ -182,3 +182,24 @@ def test_context_only_answer_omits_unrequested_market_sections(monkeypatch):
     assert "## Recent news" not in answer
     assert "## Reference sources" in answer
     assert "Reference context reflects the configured knowledge base." in answer
+
+
+def test_pdf_reference_pages_are_preserved_in_prompt_and_output(monkeypatch):
+    prompts = []
+
+    class FakeModel:
+        def stream(self, prompt):
+            prompts.append(prompt)
+            yield SimpleNamespace(content="Apple reports geographic segments.")
+
+    monkeypatch.setattr("market_research.answer.create_model", lambda: FakeModel())
+    answer = write_market_answer({
+        "question": "What are Apple's reportable segments?",
+        "needs_context": True,
+        "context": [{"source": "apple_2025.pdf", "content": "Geographic segments.",
+                     "metadata": {"page_number": page}} for page in (5, 50, 50)],
+    })
+
+    assert '"page_number": 50' in prompts[0]
+    assert "apple_2025.pdf, PDF page 5" in answer
+    assert answer.count("apple_2025.pdf, PDF page 50") == 1

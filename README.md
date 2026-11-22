@@ -35,7 +35,11 @@ The current RAG path is a predictable two-step flow:
 Question → retrieve relevant reference chunks → grounded answer
 ```
 
-The initial knowledge base is stored in `knowledge/` as Markdown with YAML frontmatter metadata. The retriever uses local embeddings and a persistent Chroma vector store. By default, the index is stored in `.rag_index/`; set `RAG_INDEX_DIR` to use another local directory. A manifest hashes the source chunks, metadata, chunking settings, embedding identity, and index version, so the index is reused across CLI runs and rebuilt when its inputs change. It returns at most the two highest-scoring chunks, filters out chunks below a relevance threshold, and uses ticker metadata to exclude unrelated company documents while retaining generic untickered documents.
+The knowledge base is stored in `knowledge/` as Markdown with YAML frontmatter and PDFs with YAML sidecars. The retriever uses local embeddings and a persistent Chroma vector store. By default, the index is stored in `.rag_index/`; set `RAG_INDEX_DIR` to use another local directory. A manifest hashes the source chunks, metadata, chunking settings, embedding identity, and index version, so the index is reused across CLI runs and rebuilt when its inputs change.
+
+Retrieval combines up to 20 vector candidates with up to 20 BM25 keyword candidates, using reciprocal rank fusion to return at most two passages. Keyword ranks have twice the weight of vector ranks. The cosine threshold of 0.45 applies to vector candidates; keyword matches can recover passages missed by vector search. These scores rank evidence and are not probabilities that an answer is correct. Keyword scoring scans the loaded chunks locally, which suits the current small corpus.
+
+Both searches filter by ticker, retaining generic untickered documents. An explicit annual-report/10-K reference adds a document-type filter; a single year in that request also filters `document_version` (annual-report sidecars should use the report year there). Within that scope, the search focuses on the topic rather than repeating company and report identifiers. PDF loading strips repeated margin lines, and each selected PDF chunk includes at most one neighboring chunk on either side from the same page. References display the PDF page number, which can differ from the report's printed page number.
 
 Company documents declare metadata explicitly:
 
@@ -208,7 +212,7 @@ python -m pytest -q
 
 External services are mocked in the normal tests, so they are fast, deterministic, and do not consume Yahoo, Tavily, or model API requests.
 
-The RAG tests also include deterministic evaluation cases for Apple, Microsoft, methodology questions, and ticker-filter cross-contamination.
+The RAG tests also include deterministic evaluation cases for Apple, Microsoft, methodology questions, keyword recovery when vector search misses the answer, company/year filtering, PDF margin cleanup, adjacent context, and PDF page references.
 
 ## Current limitations
 

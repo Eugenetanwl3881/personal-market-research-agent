@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from langchain_core.documents import Document
@@ -11,12 +12,107 @@ from pypdf.generic import (
 )
 
 from market_research.rag import (
+    ScoreThresholdRetriever,
     build_knowledge_retriever,
     ingest_knowledge_base,
     load_knowledge_documents,
     search_knowledge,
     split_documents,
 )
+
+
+def test_hybrid_recovers_segment_answer_outside_vector_candidates():
+    """Exact filing terms recover evidence even when vectors prefer certificates."""
+    metadata = {
+        "ticker_scope": "AAPL", "company": "Apple Inc.",
+        "document_type": "annual_report", "document_version": "2025",
+        "source": "apple_2025.pdf", "source_format": "pdf", "page_number": 50,
+    }
+    answer = Document(
+        id="answer", page_content="The reportable segments are Americas, Europe, "
+        "Greater China, Japan and Rest of Asia Pacific.",
+        metadata={**metadata, "start_index": 0},
+    )
+    certificate = Document(
+        id="certificate", page_content="Apple Inc. 2025 Form 10-K certification.",
+        metadata={**metadata, "page_number": 80, "start_index": 0},
+    )
+
+    class VectorStore:
+        def similarity_search_with_relevance_scores(self, query, **kwargs):
+            assert query == "reportable segments"
+            assert kwargs["k"] == 20
+            return [(certificate, 0.99)]
+
+    retriever = ScoreThresholdRetriever(
+        vector_store=VectorStore(), keyword_documents=[certificate, answer],
+        tickers=["AAPL"], k=1,
+    )
+    result = retriever.invoke(
+        "According to Apple's 2025 Form 10-K, what are its reportable segments?"
+    )
+
+    assert result[0].metadata["page_number"] == 50
+    assert "Greater China, Japan and Rest of Asia Pacific" in result[0].page_content
+    assert "keyword_score" in result[0].metadata
+    assert "relevance_score" not in result[0].metadata  # No invented cosine score.
+
+
+def test_hybrid_expands_split_pdf_passage_without_crossing_pages():
+    metadata = {"source": "report.pdf", "source_format": "pdf",
+                "ticker_scope": "AAPL", "page_number": 50}
+    chunks = [
+        Document(id="before", page_content="Americas, Europe, Greater China, Japan and Rest of Asia Pacific.",
+                 metadata={**metadata, "start_index": 0}),
+        Document(id="hit", page_content="Each of the reportable segments operates separately.",
+                 metadata={**metadata, "start_index": 70}),
+        Document(id="other-page", page_content="Unrelated page contents.",
+                 metadata={**metadata, "page_number": 51, "start_index": 0}),
+    ]
+
+    class VectorStore:
+        def similarity_search_with_relevance_scores(self, query, **kwargs):
+            return [(chunks[1], 0.9)]
+
+    result = ScoreThresholdRetriever(
+        vector_store=VectorStore(), keyword_documents=chunks, tickers=["AAPL"], k=1,
+    ).invoke("What are the reportable segments?")
+
+    assert "Americas, Europe, Greater China, Japan and Rest of Asia Pacific" in result[0].page_content
+    assert "Unrelated page contents" not in result[0].page_content
+    assert result[0].metadata["page_number"] == 50
+    assert result[0].metadata["matched_start_index"] == 70
+
+
+def test_hybrid_filters_company_and_report_year_in_both_searches(tmp_path: Path):
+    for ticker, year in [("AAPL", "2025"), ("AAPL", "2024"), ("MSFT", "2025")]:
+        (tmp_path / f"{ticker}_{year}.md").write_text(
+            f"---\nticker: {ticker}\ndocument_type: annual_report\n"
+            f'document_version: "{year}"\n---\n'
+            f"{ticker} reportable segments for {year}.", encoding="utf-8",
+        )
+    embeddings = CountingEmbeddings()
+    retriever = build_knowledge_retriever(
+        tmp_path, embeddings=embeddings, tickers=["AAPL"],
+        score_threshold=0, persist_directory=tmp_path / "index",
+    )
+    results = retriever.invoke("What are AAPL's reportable segments in its 2025 Form 10-K?")
+
+    assert [doc.metadata["source"] for doc in results] == ["AAPL_2025.md"]
+    assert embeddings.query_calls == 1
+    assert retriever.invoke("What are AAPL's segments in its 2023 annual report?") == []
+
+
+def test_pdf_loader_removes_repeated_margins_but_keeps_page_numbers(tmp_path: Path, monkeypatch):
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.touch()
+    pdf_path.with_suffix(".yaml").write_text("document_type: annual_report\n", encoding="utf-8")
+    pages = [SimpleNamespace(extract_text=lambda n=n: f"Body for page {n}.\nApple Inc. | 2025 Form 10-K | {n}")
+             for n in range(1, 5)]
+    monkeypatch.setattr("pypdf.PdfReader", lambda path: SimpleNamespace(pages=pages))
+    docs = load_knowledge_documents(tmp_path)
+    assert [doc.page_content for doc in docs] == [f"Body for page {n}." for n in range(1, 5)]
+    assert [doc.metadata["page_number"] for doc in docs] == [1, 2, 3, 4]
 
 
 class KeywordEmbeddings(Embeddings):

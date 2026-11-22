@@ -49,6 +49,7 @@ def prepare_reference_evidence(
         evidence.append(
             {
                 "source": source,
+                **({"page_number": metadata["page_number"]} if "page_number" in metadata else {}),
                 "content": content[:max_content_characters],
             }
         )
@@ -196,9 +197,11 @@ def _format_context_sources(context: list[dict]) -> list[str]:
     for item in context:
         metadata = item.get("metadata", {})
         source = item.get("source") or metadata.get("source", "Unknown source")
-        if source not in seen:
-            sources.append(f"- {source}")
-            seen.add(source)
+        page_number = metadata.get("page_number")
+        label = f"{source}, PDF page {page_number}" if page_number is not None else source
+        if label not in seen:
+            sources.append(f"- {label}")
+            seen.add(label)
     return sources
 
 
