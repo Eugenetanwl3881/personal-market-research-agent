@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "cases": [
     {
       "id": "apple-reportable-segments",
@@ -95,7 +95,7 @@
         "pages": [],
         "required_terms": ["Productivity and Business Processes", "Intelligent Cloud", "More Personal Computing"]
       }],
-      "notes": "Expected source is the current curated overview; no Microsoft annual report is in this corpus yet."
+      "notes": "Original baseline probe targeting the curated overview. Retain its expected source to reveal source-ranking drift when an annual report is added; separate cases target the PDF."
     },
     {
       "id": "missing-apple-report-year",
@@ -112,6 +112,62 @@
       "answerable": false,
       "expected_evidence": [],
       "notes": "Strict retrieval-abstention case: the report supplies no such forecast. Returning related text fails the empty-result check but does not prove the answer model would invent a forecast."
+    },
+    {
+      "id": "microsoft-reportable-segments",
+      "question": "According to Microsoft's 2025 Form 10-K, what are its reportable segments?",
+      "tickers": ["MSFT"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/microsoft/annual_report_2025.pdf",
+        "pages": [5, 36, 82],
+        "required_terms": ["Productivity and Business Processes", "Intelligent Cloud", "More Personal Computing"]
+      }],
+      "notes": "Verified in Operating Segments, MD&A Reportable Segments, and Note 18. Microsoft's business segments must not be confused with Apple's geographic segments. A valid page is insufficient if the retrieved excerpt omits the names."
+    },
+    {
+      "id": "microsoft-segments-paraphrase",
+      "question": "Which three business segments does Microsoft use to report financial performance in its 2025 annual report?",
+      "tickers": ["MSFT"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/microsoft/annual_report_2025.pdf",
+        "pages": [5, 36, 82],
+        "required_terms": ["Productivity and Business Processes", "Intelligent Cloud", "More Personal Computing"]
+      }],
+      "notes": "Paraphrase of the same segment question, using the same verified page alternatives."
+    },
+    {
+      "id": "microsoft-employees",
+      "question": "How many people did Microsoft employ on a full-time basis according to its 2025 Form 10-K?",
+      "tickers": ["MSFT"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/microsoft/annual_report_2025.pdf",
+        "pages": [9],
+        "required_terms": ["June 30, 2025", "228,000", "full-time basis", "125,000", "103,000"]
+      }],
+      "notes": "Historical worldwide, U.S., and international counts. Must not substitute Apple's 166,000 figure."
+    },
+    {
+      "id": "microsoft-intelligent-cloud",
+      "question": "According to Microsoft's 2025 annual report, what does the Intelligent Cloud segment include?",
+      "tickers": ["MSFT"],
+      "answerable": true,
+      "expected_evidence": [{
+        "source": "raw/microsoft/annual_report_2025.pdf",
+        "pages": [6, 83],
+        "required_terms": ["Intelligent Cloud", "Azure", "SQL Server"]
+      }],
+      "notes": "Verified product examples from the segment description, not a general cloud-industry description."
+    },
+    {
+      "id": "missing-microsoft-report-year",
+      "question": "According to Microsoft's 2024 Form 10-K, what are its reportable segments?",
+      "tickers": ["MSFT"],
+      "answerable": false,
+      "expected_evidence": [],
+      "notes": "Only the fiscal-2025 Microsoft report is present. Historical figures in that report do not replace the requested 2024 report."
     }
   ]
 }

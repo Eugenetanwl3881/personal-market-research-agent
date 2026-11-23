@@ -161,8 +161,21 @@ After downloading a report, refresh the persistent index:
 market-research-index --force
 ```
 
-The downloader is intentionally source-specific for now. Apple is the first
-adapter; other issuers can be added without changing the PDF loader.
+Microsoft fiscal-2025 Form 10-K is also available through the downloader:
+
+```bash
+market-research-fetch --ticker MSFT --year 2025
+```
+
+It writes `knowledge/raw/microsoft/annual_report_2025.pdf` and its YAML sidecar.
+The PDF is from Microsoft's official investor-relations host:
+[Microsoft fiscal-2025 Form 10-K](https://microsoft.gcs-web.com/static-files/9640e86d-a99f-4502-934d-1d3c883fa786).
+Microsoft's adapter uses a registry of verified PDF URLs; it currently supports
+only fiscal 2025. With no `--year`, it selects the newest configured PDF, not
+necessarily the latest report Microsoft has published. Unsupported years fail
+explicitly. The existing local PDF/sidecar is protected unless `--force` is used.
+Apple's recent-year discovery behavior is unchanged. Both adapters use the
+existing PDF loader; no format conversion is required.
 
 Use `--force` or `--force-rebuild` to rebuild even when the existing index is current. You can override the source and output locations with `--knowledge-dir` and `--index-dir`. Research queries still check the index automatically, so explicit ingestion is optional but useful when preparing a deployment or verifying the knowledge base.
 
@@ -237,13 +250,13 @@ To measure retrieval with the real embedding model and current documents:
 python -m market_research.evaluate
 ```
 
-This evaluates ten labelled questions without calling the answer model or market
+This evaluates fifteen labelled questions without calling the answer model or market
 data APIs. Results and retrieved evidence are saved to the Git-ignored
 `evaluations/results/latest.json`. See [the evaluation guide](evaluations/README.md)
 for metrics and known baseline failures. It checks retrieval directly; it does
 not evaluate request parsing or final-answer quality.
 
-To generate final answers for the three evidence-sufficiency cases and prepare
+To generate final answers for the six evidence-sufficiency cases and prepare
 a human review, run:
 
 ```bash
@@ -260,7 +273,7 @@ correctness grades; review the full answers against their evidence. See the
 
 - Prices are latest available closes, not guaranteed live prices.
 - Yahoo Finance and Tavily data can be delayed, incomplete, or unavailable.
-- The initial RAG corpus is small and local; automated downloading and refreshing of official filings are future work.
+- The RAG corpus is small and local. Download adapters cover Apple and Microsoft's configured fiscal-2025 PDF; broader discovery and scheduled refresh are future work.
 - Hugging Face authentication is currently optional; configure `HF_TOKEN` later
   if higher rate limits or more reliable embedding-model downloads are needed.
 - The first version has no portfolios, trade execution, database, dashboard, or conversation memory.

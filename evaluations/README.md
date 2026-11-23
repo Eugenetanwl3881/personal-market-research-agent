@@ -1,7 +1,7 @@
 # Retrieval evaluation
 
-`retrieval_cases.json` is a small, manually labelled evaluation set for the
-current knowledge base. It is outside `knowledge/` so questions and expected
+`retrieval_cases.json` is a manually labelled evaluation set of fifteen questions
+for Apple, Microsoft, and methodology documents. It is outside `knowledge/` so questions and expected
 answers cannot accidentally become retrieval evidence.
 
 ## Run
@@ -110,9 +110,9 @@ running embeddings or an answer model.
 
 ## Final-answer evaluation
 
-`answer_cases.json` defines expectations and review questions for three cases:
-the supported Apple segments question, the missing 2023 report, and the
-unsupported exact future-price forecast. Each references a question from
+`answer_cases.json` defines expectations and review questions for six cases:
+the original Apple segments, missing-2023-report, and future-price cases, plus
+Microsoft segments, employee count, and a missing-2024-report case. Each references a question from
 `retrieval_cases.json` so the wording and retrieval labels stay consistent.
 
 Run:
@@ -125,8 +125,9 @@ Use offline mode only when the embedding model is cached. It prevents Hugging
 Face checks; the answer model still requires network access and a configured
 `OPENCODE_API_KEY`. Model-written summaries make one streamed answer request
 each and may incur provider usage. The current default run uses the model for
-the supported segments and forecast cases; the empty-evidence missing-report
-case returns an application-written limitation without a summary-model call.
+the two supported segment questions, Microsoft's headcount, and the forecast
+case. The two missing-report cases return application-written limitations
+without summary-model calls.
 No judge model is called. After reinstalling the editable package,
 `market-research-evaluate-answers` runs the same command.
 
@@ -163,8 +164,8 @@ the other automatically.
 The automated checks look for:
 
 - A nonempty answer summary, written by the model or the application.
-- The required region names, supporting retrieved evidence, and a rendered
-  expected reference for the supported case.
+- Required facts, supporting retrieved evidence, and a rendered expected
+  reference for supported cases.
 - Limitation language in the answer summary for unsupported cases.
   Python's static limitations section and disclaimer cannot satisfy this check.
 - Currency amounts that deserve inspection in the forecast case.
@@ -219,11 +220,61 @@ as absent. Retrieval errors produce a different limitation message. Mixed
 requests still render available quotes/calculations and can summarize news.
 No missing report contents are supplied by a model in this fallback path.
 
-These three answer cases are a small starting set: one supported control,
-one missing-source case, and one unsupported prediction. Each model-written
-answer costs a provider request and human review time. Broader coverage is
+The initial three answer cases were a small starting set; version 2 adds three
+Microsoft cases. Each model-written answer costs a provider request and human
+review time. Broader coverage is
 still needed for irrelevant or incomplete evidence, multiple reports, and
 misleading claims inside otherwise plausible answers. Ordinary regression tests
 already cover blank/error evidence, streaming, mixed requests, and the graph
 path without using live services. Passing this set does not establish general
 answer correctness.
+
+## Microsoft report expansion (dataset version 2)
+
+The corpus now includes Microsoft's fiscal-2025 Form 10-K from its official
+investor-relations host, stored as
+`knowledge/raw/microsoft/annual_report_2025.pdf` with a YAML sidecar. The PDF has
+158 pages. Expectations were checked against its extracted source text:
+
+- Segments: PDF pages 5, 36, and 82.
+- Employee counts: PDF page 9.
+- Intelligent Cloud product examples: PDF pages 6 and 83.
+
+Five retrieval cases were added: segments, a paraphrase, headcount, Intelligent
+Cloud, and a missing report year. The original ten questions and their expected
+sources/pages/terms are retained; only the overview case's explanatory note was
+updated to reflect the larger corpus. All original pass/fail outcomes remained
+the same after the addition. The overview question still intentionally tests
+retrieval of `microsoft.md`; report-specific questions target the PDF.
+
+The verified-label run is saved separately as
+`evaluations/results/retrieval_after_msft_verified_labels.json`:
+
+- 13/15 cases passed, with no execution errors.
+- 12/12 answerable cases found an acceptable source/page.
+- 11/12 answerable cases found the required facts in a returned passage.
+- Source/page MRR (still named `mean_reciprocal_rank`): approximately 0.958.
+- Two of three strict unanswerable cases returned no passages.
+
+The direct Microsoft segment question retrieves page 61's accounting guidance
+and a page-36 excerpt that omits the full segment list. Its paraphrase retrieves
+the list on page 5. Page 36 was added to the valid location labels after checking
+its complete source text; the direct question still fails the required-facts
+check. The other failure remains the original strict future-price empty-result
+case. Preserve both failures rather than adjusting ranking to make this set pass.
+
+Ranking code, weights, thresholds, candidate count, final k, and metric
+definitions were kept unchanged. A new corpus and new questions measure a
+different condition, so compare the original ten cases separately as well as
+the expanded totals. All retrieved passages for company-scoped questions were
+also checked for company-metadata consistency.
+
+The six-case live answer run is saved in
+`evaluations/results/answers_after_msft.json` with its readable `.md` companion.
+Five cases passed automated signals, and the direct Microsoft segment question
+was flagged for missing names and supporting retrieved facts. Its answer
+appropriately acknowledged that the supplied excerpts do not establish the
+complete list. This is an answer-completeness/retrieval failure under the case
+expectation, not an invented segment list. The employee answer used the verified
+historical total and date. Both missing-report summaries came from the
+application. All six still have pending human review fields.

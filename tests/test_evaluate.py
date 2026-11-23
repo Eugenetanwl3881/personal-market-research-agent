@@ -109,3 +109,14 @@ def test_dataset_answerable_labels_are_supported_by_the_real_sources():
                         for term in expected.required_terms)
                     for doc in matches
                 ), (case.id, expected.source, page)
+
+
+def test_real_report_metadata_keeps_apple_and_microsoft_distinct():
+    documents = load_knowledge_documents()
+    for company, ticker in [("apple", "AAPL"), ("microsoft", "MSFT")]:
+        source = f"raw/{company}/annual_report_2025.pdf"
+        pages = [document for document in documents if document.metadata["source"] == source]
+        assert pages
+        assert all(document.metadata["ticker"] == ticker for document in pages)
+        assert all(document.metadata["ticker_scope"] == ticker for document in pages)
+        assert all(document.metadata["fiscal_year"] == 2025 for document in pages)

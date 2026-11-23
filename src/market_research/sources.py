@@ -22,6 +22,13 @@ APPLE_REPORT_URL_TEMPLATE = (
     "https://s2.q4cdn.com/470004039/files/doc_financials/"
     "{year}/ar/_10-K-{year}-As-Filed.pdf"
 )
+MICROSOFT_TICKER = "MSFT"
+MICROSOFT_COMPANY = "Microsoft Corporation"
+# Verified official investor-relations PDFs. Microsoft uses opaque asset URLs,
+# so do not guess URLs or substitute a different fiscal year.
+MICROSOFT_REPORT_URLS = {
+    2025: "https://microsoft.gcs-web.com/static-files/9640e86d-a99f-4502-934d-1d3c883fa786",
+}
 DEFAULT_DOWNLOAD_TIMEOUT = 30.0
 MAX_REPORT_SIZE_BYTES = 50 * 1024 * 1024
 
@@ -194,4 +201,57 @@ def fetch_apple_annual_report(
     details = "; ".join(failures)
     raise RuntimeError(
         f"Could not find an Apple annual report for years {attempted}. {details}"
+    )
+
+
+def fetch_microsoft_annual_report(
+    *,
+    report_year: int | None = None,
+    knowledge_dir: str | Path | None = None,
+    force: bool = False,
+    timeout: float = DEFAULT_DOWNLOAD_TIMEOUT,
+    opener: Callable[..., Any] = urlopen,
+) -> DownloadedReport:
+    """Download a verified Microsoft Form 10-K PDF and validated sidecar.
+
+    Without a year, use the newest configured PDF, not a claim about the latest
+    report Microsoft has published. Currently the verified registry covers 2025.
+    """
+    if timeout <= 0:
+        raise ValueError("timeout must be greater than zero.")
+    year = max(MICROSOFT_REPORT_URLS) if report_year is None else report_year
+    if year not in MICROSOFT_REPORT_URLS:
+        supported = ", ".join(str(value) for value in sorted(MICROSOFT_REPORT_URLS))
+        raise ValueError(
+            f"No official Microsoft PDF is configured for fiscal year {year}. "
+            f"Configured years: {supported}."
+        )
+
+    directory = Path(knowledge_dir) if knowledge_dir else Path("knowledge")
+    pdf_path = directory / "raw" / "microsoft" / f"annual_report_{year}.pdf"
+    metadata_path = pdf_path.with_suffix(".yaml")
+    if (pdf_path.exists() or metadata_path.exists()) and not force:
+        raise FileExistsError(
+            f"Report or metadata already exists: {pdf_path}. Use --force to replace it."
+        )
+    source_url = MICROSOFT_REPORT_URLS[year]
+    metadata = KnowledgeDocumentMetadata(
+        ticker=MICROSOFT_TICKER,
+        company=MICROSOFT_COMPANY,
+        document_type="annual_report",
+        source_name=f"Microsoft {year} Form 10-K Annual Report",
+        source_url=source_url,
+        fiscal_year=year,
+        document_version="1",
+        last_reviewed=date.today(),
+    ).model_dump(mode="json", exclude_none=True)
+    content = _download_pdf(source_url, timeout=timeout, opener=opener)
+    _atomic_write(pdf_path, content)
+    _atomic_write(metadata_path, yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True))
+    return DownloadedReport(
+        ticker=MICROSOFT_TICKER,
+        report_year=year,
+        pdf_path=pdf_path,
+        metadata_path=metadata_path,
+        source_url=source_url,
     )

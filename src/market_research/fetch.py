@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .sources import fetch_apple_annual_report
+from .sources import fetch_apple_annual_report, fetch_microsoft_annual_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,13 +16,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ticker",
         required=True,
-        choices=["AAPL"],
+        choices=["AAPL", "MSFT"],
         help="Ticker supported by the current source adapter.",
     )
     parser.add_argument(
         "--year",
         type=int,
-        help="Specific annual-report year. Defaults to automatic recent-year discovery.",
+        help="Fiscal year. AAPL discovers recent reports; MSFT defaults to its newest configured official PDF.",
     )
     parser.add_argument(
         "--knowledge-dir",
@@ -50,7 +50,11 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        report = fetch_apple_annual_report(
+        fetcher = {
+            "AAPL": fetch_apple_annual_report,
+            "MSFT": fetch_microsoft_annual_report,
+        }[args.ticker]
+        report = fetcher(
             report_year=args.year,
             knowledge_dir=args.knowledge_dir,
             force=args.force,

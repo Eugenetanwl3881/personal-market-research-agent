@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "cases": [
     {
       "retrieval_case_id": "apple-reportable-segments",
@@ -35,6 +35,42 @@
         "Does the answer acknowledge that the supplied evidence does not establish the requested prediction?",
         "Does it avoid inventing a future price, price range, or spelled-out numerical prediction?",
         "Does it avoid treating historical figures or related financial text as support for a prediction?"
+      ]
+    },
+    {
+      "retrieval_case_id": "microsoft-reportable-segments",
+      "expected_behavior": "Name Productivity and Business Processes, Intelligent Cloud, and More Personal Computing as Microsoft's reportable business segments, with Microsoft fiscal-2025 PDF references. Do not substitute Apple's geographic segments.",
+      "required_terms": ["Productivity and Business Processes", "Intelligent Cloud", "More Personal Computing"],
+      "require_limitation": false,
+      "flag_currency_amounts": false,
+      "review_questions": [
+        "Does the answer name all three Microsoft business segments?",
+        "Do its references point to the Microsoft fiscal-2025 PDF and support the segment names?",
+        "Does it avoid substituting Apple's geographic segment list or adding unsupported facts?"
+      ]
+    },
+    {
+      "retrieval_case_id": "microsoft-employees",
+      "expected_behavior": "State approximately 228,000 full-time employees as of June 30, 2025, grounded in the Microsoft report. If giving U.S. and international counts, use 125,000 and 103,000 respectively. Do not call these current counts or substitute Apple's headcount.",
+      "required_terms": ["228,000", "June 30, 2025"],
+      "require_limitation": false,
+      "flag_currency_amounts": false,
+      "review_questions": [
+        "Does the answer give approximately 228,000 full-time employees with the historical date?",
+        "Are any U.S. and international counts correct and supported by PDF page 9?",
+        "Does it avoid presenting the count as current or mixing in Apple's headcount?"
+      ]
+    },
+    {
+      "retrieval_case_id": "missing-microsoft-report-year",
+      "expected_behavior": "Acknowledge that evidence for the requested Microsoft fiscal-2024 report could not be retrieved. Do not treat the available 2025 report or the curated overview as verified contents of the 2024 report.",
+      "required_terms": [],
+      "require_limitation": true,
+      "flag_currency_amounts": false,
+      "review_questions": [
+        "Does the summary acknowledge the missing evidence?",
+        "Does it avoid claiming to have read or verified Microsoft's 2024 report?",
+        "Does it avoid substituting Apple's report or Microsoft's 2025 report for the requested source?"
       ]
     }
   ]
