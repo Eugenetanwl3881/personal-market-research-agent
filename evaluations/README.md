@@ -278,3 +278,38 @@ complete list. This is an answer-completeness/retrieval failure under the case
 expectation, not an invented segment list. The employee answer used the verified
 historical total and date. Both missing-report summaries came from the
 application. All six still have pending human review fields.
+
+## PDF context window at page boundaries
+
+The Microsoft segment failure exposed unused context budget at a page boundary.
+The search hit was the final chunk on PDF page 36. The old expansion included
+one preceding chunk and no following chunk, producing only two chunks. The
+complete list was two chunks before the hit. The updated expansion shifts the
+window to retain up to three contiguous chunks: two preceding an end hit, or
+two following a start hit, while staying on the same page. Interior windows
+still include one preceding and one following chunk.
+
+This changes evidence assembly without changing the stored corpus, embeddings,
+source-page order, ranking weights, thresholds, candidate count, final k, or
+metric definitions. Dataset and index signatures match the pre-fix run; only
+the retriever-code hash changes. Regression tests cover both page boundaries,
+the three-chunk budget, and exclusion of other pages.
+
+The unchanged fifteen-case dataset now passes 14/15 cases. All twelve answerable
+questions contain the required facts, with no previous passing case regressing.
+Both Microsoft segment phrasings pass: the direct question finds the complete
+list in its second passage (page 36), and the paraphrase in its first (page 5).
+The facts survive the answer prompt's evidence normalization and character cap.
+The existing strict future-price empty-result case remains the sole failure.
+Source/page MRR stays approximately 0.958, illustrating that evidence quality
+can improve without changing the positions of the source pages.
+
+The six-case live answer evaluation passes all automated checks. The direct
+Microsoft answer now lists all three segments. Human review fields remain
+pending; automated signals do not establish general correctness.
+
+The previous reports are preserved. Compare them with:
+
+- `evaluations/results/retrieval_after_page_edge_context.json`
+- `evaluations/results/answers_after_page_edge_context.json`
+- `evaluations/results/answers_after_page_edge_context.md`

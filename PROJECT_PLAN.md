@@ -22,7 +22,7 @@
 - Richer sectioned company and methodology documents with review/version metadata.
 - Page-aware PDF ingestion with required YAML sidecar metadata.
 - Explicit validated fiscal-year metadata for annual reports, separate from document revisions, used in both retrieval filters.
-- Hybrid BM25/vector retrieval with company/report-year filtering, PDF margin cleanup, and neighboring context.
+- Hybrid BM25/vector retrieval with company/report-year filtering, PDF margin cleanup, and bounded neighboring context that shifts at page boundaries.
 - PDF page numbers in reference evidence and rendered references.
 - Automated Apple annual-report download with generated and validated sidecar metadata.
 - Verified Microsoft fiscal-2025 Form 10-K PDF downloader, validated sidecar, and page-labelled evaluation cases; retrieval ranking unchanged.

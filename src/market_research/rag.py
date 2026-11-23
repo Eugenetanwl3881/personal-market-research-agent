@@ -197,6 +197,8 @@ class ScoreThresholdRetriever(BaseRetriever):
 
         A list or sentence can cross a chunk boundary. At most three original
         chunks are joined, keeping evidence bounded and page metadata intact.
+        At page boundaries, shift the window toward available neighbors rather
+        than dropping context because the hit has no preceding/following chunk.
         """
         metadata = document.metadata
         if metadata.get("source_format") != "pdf" or "start_index" not in metadata:
@@ -211,7 +213,9 @@ class ScoreThresholdRetriever(BaseRetriever):
                           if chunk.metadata["start_index"] == metadata["start_index"]), None)
         if hit_index is None:
             return document
-        neighbors = page_chunks[max(0, hit_index - 1):hit_index + 2]
+        window_size = min(3, len(page_chunks))
+        window_start = min(max(0, hit_index - 1), len(page_chunks) - window_size)
+        neighbors = page_chunks[window_start:window_start + window_size]
         content = neighbors[0].page_content
         start = neighbors[0].metadata["start_index"]
         end = start + len(content)

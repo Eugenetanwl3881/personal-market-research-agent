@@ -86,6 +86,45 @@ def test_hybrid_expands_split_pdf_passage_without_crossing_pages():
     assert result[0].metadata["matched_start_index"] == 70
 
 
+@pytest.mark.parametrize("hit_at_start", [True, False])
+def test_pdf_page_edge_hit_recovers_list_two_chunks_away_within_budget(hit_at_start):
+    """An edge hit should not lose a list just because one neighbor is absent."""
+    metadata = {"source": "report.pdf", "source_format": "pdf",
+                "ticker_scope": "MSFT", "page_number": 7}
+    hit_text = "Information about reportable segments."
+    list_text = "The divisions are Alpha, Beta and Gamma."
+    between_text = "The company manages each division separately."
+    outside_text = "UNRELATED_PAGE_MATERIAL"
+    texts = ([hit_text, between_text, list_text, outside_text] if hit_at_start
+             else [outside_text, list_text, between_text, hit_text])
+    chunks = []
+    offset = 0
+    for index, text in enumerate(texts):
+        chunks.append(Document(id=f"chunk-{index}", page_content=text,
+                               metadata={**metadata, "start_index": offset}))
+        offset += len(text) + 1
+    hit = chunks[0] if hit_at_start else chunks[-1]
+    other_page = Document(id="another-page", page_content="OTHER_PAGE_EVIDENCE",
+                          metadata={**metadata, "page_number": 8, "start_index": 0})
+
+    class VectorStore:
+        def similarity_search_with_relevance_scores(self, query, **kwargs):
+            return [(hit, 0.9)]
+
+    result = ScoreThresholdRetriever(
+        vector_store=VectorStore(), keyword_documents=[*chunks, other_page],
+        tickers=["MSFT"], k=1,
+    ).invoke("What are the reportable segments?")[0]
+
+    assert list_text in result.page_content
+    assert hit_text in result.page_content
+    assert between_text in result.page_content
+    assert outside_text not in result.page_content
+    assert "OTHER_PAGE_EVIDENCE" not in result.page_content
+    assert result.metadata["page_number"] == 7
+    assert result.metadata["matched_start_index"] == hit.metadata["start_index"]
+
+
 def test_hybrid_filters_company_and_report_year_in_both_searches(tmp_path: Path):
     for ticker, year in [("AAPL", "2025"), ("AAPL", "2024"), ("MSFT", "2025")]:
         revision = "2025" if year == "2024" else "1"
