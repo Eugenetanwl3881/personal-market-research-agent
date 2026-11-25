@@ -1,12 +1,14 @@
 """Incremental ingestion against a real temporary Chroma collection, offline."""
 
 import json
+import os
 import pytest
 from chromadb import PersistentClient
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
 from market_research.indexing import identify_chunks
+from market_research import rag
 from market_research.rag import ingest_knowledge_base
 
 
@@ -226,3 +228,135 @@ def test_configured_model_change_invalidates_vectors(corpus):
     result = ingest(second_model)
     assert result.rebuilt
     assert result.changes.embedded_texts == 1
+
+
+def test_unchanged_sources_skip_loading_and_splitting_but_keep_keyword_search(corpus, monkeypatch):
+    knowledge, write, ingest, _ = corpus
+    write("apple.md", "\n\n".join(["A" * 35, "B" * 35, "C" * 35]))
+    first = ingest(chunk_size=40, chunk_overlap=0)
+    manifest = first.manifest_path.read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Unchanged source was loaded or split")
+
+    monkeypatch.setattr(rag, "_load_knowledge_source", forbidden)
+    monkeypatch.setattr(rag, "split_documents", forbidden)
+    model = CountingEmbeddings()
+    second = ingest(model, chunk_size=40, chunk_overlap=0)
+    assert second.document_count == first.document_count == 1
+    assert second.changes.processed_sources == 0
+    assert second.changes.skipped_sources == 1
+    assert model.texts == []
+    assert second.manifest_path.read_bytes() == manifest
+
+    retriever = rag.build_knowledge_retriever(
+        knowledge, embeddings=model, persist_directory=first.persist_directory,
+        collection_name=first.collection_name, chunk_size=40, chunk_overlap=0,
+    )
+    # Chroma is free to return records in a different order. Keep the manifest
+    # order for BM25 tie breaks and context expansion.
+    expected_ids = next(iter(json.loads(manifest)["sources"].values()))["chunk_ids"]
+    assert [chunk.id for chunk in retriever.keyword_documents] == expected_ids
+    monkeypatch.setattr(
+        retriever.vector_store, "similarity_search_with_relevance_scores", lambda *a, **kw: [],
+    )
+    results = retriever.invoke("B" * 35)
+    assert results[0].page_content == "B" * 35
+    assert results[0].metadata["source"] == "apple.md"
+
+
+def test_only_changed_or_new_sources_are_loaded(corpus, monkeypatch):
+    _, write, ingest, _ = corpus
+    write("apple.md")
+    write("microsoft.md", "Microsoft sells software.", "ticker: MSFT\n")
+    ingest()
+    write("apple.md", "Apple sells phones.")
+    write("new.md", "New company research.")
+    loaded = []
+    loader = rag._load_knowledge_source
+
+    def spy(path, source):
+        loaded.append(source)
+        return loader(path, source)
+
+    monkeypatch.setattr(rag, "_load_knowledge_source", spy)
+    report = ingest()
+    assert loaded == ["apple.md", "new.md"]
+    assert report.changes.processed_sources == 2
+    assert report.changes.skipped_sources == 1
+
+
+@pytest.mark.parametrize("invalidation", ["force", "chunking", "loader", "legacy", "missing_chunk", "metadata"])
+def test_cache_invalidation_reprocesses_sources(corpus, monkeypatch, invalidation):
+    _, write, ingest, records = corpus
+    write("apple.md")
+    first = ingest()
+    kwargs = {}
+    if invalidation == "force":
+        kwargs["force_rebuild"] = True
+    elif invalidation == "chunking":
+        kwargs.update(chunk_size=80, chunk_overlap=0)
+    elif invalidation in {"loader", "legacy"}:
+        manifest = json.loads(first.manifest_path.read_text())
+        if invalidation == "loader":
+            manifest["source_processing"]["loader_version"] = 0
+        else:
+            manifest.pop("source_processing")
+        first.manifest_path.write_text(json.dumps(manifest))
+    elif invalidation == "missing_chunk":
+        PersistentClient(path=str(first.persist_directory)).get_collection(
+            first.collection_name, embedding_function=None,
+        ).delete(ids=records()["ids"])
+    else:
+        # Stage one intentionally reprocesses any metadata change too.
+        write("apple.md", metadata="ticker: AAPL\nlast_reviewed: 2026-11-25\n")
+    loaded = []
+    loader = rag._load_knowledge_source
+
+    def spy(path, source):
+        loaded.append(source)
+        return loader(path, source)
+
+    monkeypatch.setattr(rag, "_load_knowledge_source", spy)
+    model = CountingEmbeddings()
+    report = ingest(model, **kwargs)
+    assert loaded == ["apple.md"]
+    assert report.changes.processed_sources == 1
+    assert report.changes.skipped_sources == 0
+    if invalidation in {"legacy", "loader", "metadata", "chunking"}:
+        assert model.texts == []
+
+
+def test_fingerprints_detect_same_size_edit_even_with_restored_mtime(corpus):
+    _, write, ingest, _ = corpus
+    path = write("apple.md", "Apple sells phones.")
+    ingest()
+    before = path.stat()
+    write("apple.md", "Apple sells apples.")
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert path.stat().st_size == before.st_size
+    model = CountingEmbeddings()
+    report = ingest(model)
+    assert report.changes.processed_sources == 1
+    assert model.texts == ["Apple sells apples."]
+
+
+def test_source_modified_during_processing_leaves_manifest_unchanged(corpus, monkeypatch):
+    _, write, ingest, records = corpus
+    write("apple.md")
+    first = ingest()
+    before = records()["documents"]
+    manifest = first.manifest_path.read_bytes()
+    write("apple.md", "First edit.")
+    loader = rag._load_knowledge_source
+
+    def racing_loader(path, source):
+        documents = loader(path, source)
+        write("apple.md", "Second edit.")
+        return documents
+
+    monkeypatch.setattr(rag, "_load_knowledge_source", racing_loader)
+    with pytest.raises(RuntimeError, match="Source changed during ingestion"):
+        ingest()
+    assert first.manifest_path.read_bytes() == manifest
+    assert records()["documents"] == before

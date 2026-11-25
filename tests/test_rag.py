@@ -364,6 +364,52 @@ def test_load_knowledge_documents_requires_pdf_sidecar(tmp_path: Path):
         load_knowledge_documents(tmp_path)
 
 
+def test_unchanged_pdf_skips_extraction_but_pdf_or_sidecar_changes_reprocess(tmp_path, monkeypatch):
+    from market_research import rag
+
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    pdf = knowledge / "report.pdf"
+    write_text_pdf(pdf, ["Apple hardware business.", "Apple services business."])
+    sidecar = pdf.with_suffix(".yaml")
+    sidecar.write_text("ticker: AAPL\ndocument_type: annual_report\nfiscal_year: 2025\n")
+
+    def ingest(model):
+        return ingest_knowledge_base(knowledge, model, persist_directory=tmp_path / "index")
+
+    first = ingest(CountingEmbeddings())
+    calls = []
+    loader = rag._load_pdf_documents
+
+    def spy(path, source):
+        calls.append(source)
+        return loader(path, source)
+
+    monkeypatch.setattr(rag, "_load_pdf_documents", spy)
+    unchanged = ingest(CountingEmbeddings())
+    assert calls == []
+    assert unchanged.document_count == first.document_count == 2
+    assert unchanged.changes.skipped_sources == 1
+
+    sidecar.write_text(sidecar.read_text() + "last_reviewed: 2026-11-25\n")
+    model = CountingEmbeddings()
+    updated = ingest(model)
+    assert calls == ["report.pdf"]
+    assert updated.changes.processed_sources == 1
+    assert updated.changes.metadata_updates == 2
+    assert model.document_calls == 0
+
+    write_text_pdf(pdf, ["Apple updated hardware business.", "Apple services business."])
+    model = CountingEmbeddings()
+    changed = ingest(model)
+    assert calls == ["report.pdf", "report.pdf"]
+    assert changed.changes.embedded_texts == 1
+
+    sidecar.unlink()
+    with pytest.raises(FileNotFoundError, match="requires a YAML sidecar"):
+        ingest(CountingEmbeddings())
+
+
 def test_split_documents_preserves_metadata_and_creates_chunks():
     documents = [Document(page_content="Apple business information " * 50, metadata={"source": "apple.md"})]
 

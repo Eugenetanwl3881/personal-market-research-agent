@@ -79,9 +79,11 @@ class IndexChanges:
     reused_embeddings: int = 0
     duplicate_chunks: int = 0
     duplicate_sources: int = 0
+    processed_sources: int = 0
+    skipped_sources: int = 0
 
 
-def _read_manifest(path: Path) -> dict:
+def read_index_manifest(path: Path) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -106,7 +108,7 @@ def _write_manifest(path: Path, manifest: dict) -> None:
             temporary_path.unlink()
 
 
-def _source_records(documents: list[Document], chunks: list[Document]) -> dict:
+def source_records(documents: list[Document], chunks: list[Document]) -> dict:
     pages = defaultdict(list)
     chunk_ids = defaultdict(list)
     for doc in documents:
@@ -119,9 +121,53 @@ def _source_records(documents: list[Document], chunks: list[Document]) -> dict:
         document_id(source): {
             "source": source, "content_hash": _digest(source_pages),
             "chunk_ids": chunk_ids[source],
+            "document_count": len(source_pages),
         }
         for source, source_pages in pages.items()
     }
+
+
+def source_fingerprint(paths: list[Path]) -> str:
+    """Hash source/sidecar bytes, without parsing their contents or using mtimes."""
+    fingerprints = []
+    for path in paths:
+        with path.open("rb") as source:
+            fingerprint = hashlib.file_digest(source, "sha256").hexdigest()
+        fingerprints.append({"name": path.name, "sha256": fingerprint})
+    return _digest(fingerprints)
+
+
+def restore_source_chunks(collection: Any, record: dict, manifest: dict) -> list[Document] | None:
+    """Restore in original order; fall back to processing if cache data is incomplete."""
+    ids = record.get("chunk_ids")
+    source = record.get("source")
+    count = record.get("document_count")
+    if (not isinstance(ids, list) or not all(isinstance(key, str) for key in ids)
+            or len(set(ids)) != len(ids) or not isinstance(source, str)
+            or not isinstance(count, int) or count < 0
+            or not isinstance(record.get("content_hash"), str)):
+        return None
+    stored = collection.get(
+        where={"document_id": document_id(source)}, include=["documents", "metadatas"],
+    )
+    if set(stored["ids"]) != set(ids):
+        return None
+    expected = manifest.get("chunks", {})
+    if not isinstance(expected, dict):
+        return None
+    chunks = {}
+    for key, text, metadata in zip(stored["ids"], stored["documents"], stored["metadatas"]):
+        saved = expected.get(key)
+        if not isinstance(text, str) or not isinstance(metadata, dict) or not isinstance(saved, dict):
+            return None
+        chunk = Document(id=key, page_content=text, metadata=metadata)
+        if (metadata.get("source") != source or stable_chunk_id(chunk) != key
+                or saved.get("content_hash") != content_hash(text)
+                or metadata.get("content_hash") != content_hash(text)
+                or saved.get("metadata_hash") != _digest(metadata)):
+            return None
+        chunks[key] = chunk
+    return [chunks[key] for key in ids]
 
 
 def _batches(items: list):
@@ -133,8 +179,11 @@ def synchronize_index(
     *,
     client: Any,
     collection_name: str,
-    documents: list[Document],
+    sources: dict,
     chunks: list[Document],
+    processing_config: dict,
+    processed_sources: int,
+    skipped_sources: int,
     manifest_path: Path,
     signature: str,
     embedding_identity: str,
@@ -155,14 +204,13 @@ def synchronize_index(
     collection = client.get_or_create_collection(
         name=collection_name, embedding_function=None, configuration=configuration,
     )
-    previous = _read_manifest(manifest_path)
+    previous = read_index_manifest(manifest_path)
     stored = collection.get(include=["documents", "metadatas"])
     existing = {
         record_id: {"text": text, "metadata": metadata or {}}
         for record_id, text, metadata in zip(stored["ids"], stored["documents"], stored["metadatas"])
     }
     desired = {chunk.id: chunk for chunk in chunks}
-    sources = _source_records(documents, chunks)
     duplicate_sources = len(sources) - len({source["content_hash"] for source in sources.values()})
     duplicate_chunks = len(chunks) - len({chunk.metadata["content_hash"] for chunk in chunks})
     compatible = (
@@ -241,6 +289,7 @@ def synchronize_index(
         "index_version": INDEX_VERSION, "index_signature": signature,
         "embedding_identity": embedding_identity,
         "chunk_size": chunk_size, "chunk_overlap": chunk_overlap,
+        "source_processing": processing_config,
         "chunk_count": len(chunks), "sources": sources,
         "chunks": {
             chunk.id: {"document_id": chunk.metadata["document_id"],
@@ -250,11 +299,12 @@ def synchronize_index(
     }
     if manifest != previous:
         _write_manifest(manifest_path, manifest)
-    changed = rebuild or bool(added or updates or stale) or previous.get("index_signature") != signature
+    changed = rebuild or bool(added or updates or stale) or manifest != previous
     return IndexChanges(
         changed=changed, rebuilt=rebuild, rebuild_reason=reason,
         source_count=len(sources), added_chunks=len(added), metadata_updates=len(updates),
         deleted_chunks=len(stale), unchanged_chunks=len(chunks) - len(added) - len(updates),
         embedded_texts=len(missing_hashes), reused_embeddings=len(chunks) - len(missing_hashes),
         duplicate_chunks=duplicate_chunks, duplicate_sources=duplicate_sources,
+        processed_sources=processed_sources, skipped_sources=skipped_sources,
     )

@@ -16,6 +16,8 @@
 - Persistent Chroma-backed RAG index with incremental chunk synchronization.
 - Source/chunk identities, exact-text embedding reuse, metadata-only updates,
   stale-record removal, and per-run ingestion counters.
+- File/sidecar fingerprints skip unchanged-source extraction and splitting;
+  cached chunks are restored for hybrid retrieval in their original order.
 - Standalone `market-research-index` command for explicit knowledge ingestion.
 - Deterministic RAG retrieval evaluation cases for company, methodology, and ticker filtering.
 - Real-embedding retrieval evaluation command with fifteen labelled cases, saved evidence, and baseline metrics.

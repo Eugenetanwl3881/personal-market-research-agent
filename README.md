@@ -203,6 +203,8 @@ for text deleted in an earlier run are not kept in a separate permanent cache.
 
 The command reports added, metadata-updated, deleted, and unchanged chunks,
 unique texts embedded, reused embedding assignments, and duplicate counts.
+`Sources processed` counts files sent through extraction/loading and splitting;
+`Sources skipped` counts unchanged files whose chunks were restored from Chroma.
 PDF pages are counted under `Documents`; `Source files` counts the source files.
 The overall signature still records corpus/configuration changes for evaluations;
 a changed signature alone no longer forces a full rebuild.
@@ -212,9 +214,23 @@ embedding model, the index identity schema, or using `--force` also rebuilds.
 Custom embedding implementations whose hidden configuration changes must use
 `--force`; exposed `model_name` and `encode_kwargs` are included in compatibility.
 
-Ingestion still reads, extracts, and splits all source files to find changes.
-Only embedding and database writes are incremental. Use one ingestion writer
-per collection. The manifest is replaced atomically after database writes;
+Ingestion reads source bytes to calculate SHA-256 fingerprints before extraction.
+PDF fingerprints include the selected YAML sidecar's name and bytes. When the
+fingerprint and processing configuration match, it skips extraction and splitting,
+restoring the source's chunks from Chroma in their original manifest order.
+These restored chunks remain available for BM25 and PDF context expansion.
+New/changed sources follow the existing validated loader and splitter. This
+first stage also reprocesses metadata-only edits; their unchanged text still
+reuses embeddings. Source deletions continue to remove obsolete records.
+
+Older version-2 manifests need one processing pass to save fingerprints and page
+counts, without forcing new embeddings. Missing/damaged cached chunks fall back
+to source processing. Chunking settings, loader version, PDF/splitter package
+versions, and `--force` invalidate the skip path. Bump `loader_version` in
+`_source_processing_config()` when extraction or normalization rules change.
+File hashes still require reading every file; this avoids parsing and splitting,
+not disk reads. Use one ingestion writer per collection.
+The manifest is replaced atomically after database writes;
 the overall operation is not a database transaction. Interrupted writes can be
 reconciled by rerunning ingestion. Keep the same knowledge root for a collection:
 its relative paths define document identity.

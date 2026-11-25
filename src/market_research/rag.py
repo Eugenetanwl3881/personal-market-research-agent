@@ -17,7 +17,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .indexing import (
     INDEX_VERSION,
     IndexChanges,
+    document_id,
     identify_chunks,
+    read_index_manifest,
+    restore_source_chunks,
+    source_fingerprint,
+    source_records,
     stable_chunk_id as _stable_chunk_id,
     synchronize_index,
 )
@@ -107,7 +112,7 @@ class _PreparedKnowledgeIndex:
     knowledge_directory: Path
     persist_directory: Path
     collection_name: str
-    documents: list[Document]
+    document_count: int
     chunks: list[Document]
     manifest_path: Path
     rebuilt: bool
@@ -513,22 +518,33 @@ def _load_pdf_documents(pdf_path: Path, source_name: str) -> list[Document]:
     return documents
 
 
+def _knowledge_paths(directory: Path) -> list[Path]:
+    """Discover sources independently of text extraction."""
+    if not directory.is_dir():
+        raise FileNotFoundError(f"Knowledge directory does not exist: {directory}")
+    return sorted(
+        path
+        for path in directory.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".md", ".pdf"}
+    )
+
+
+def _load_knowledge_source(path: Path, source_name: str) -> list[Document]:
+    """Run the existing validated loader for one changed/new source."""
+    if path.suffix.lower() == ".pdf":
+        return _load_pdf_documents(path, source_name)
+    metadata, body = _parse_markdown_frontmatter(path.read_text(encoding="utf-8"), source_name)
+    return [Document(page_content=body, metadata=metadata)]
+
+
 def load_knowledge_documents(
     knowledge_dir: str | Path | None = None,
     *,
     allow_empty: bool = False,
 ) -> list[Document]:
-    """Load Markdown and PDF files with validated metadata."""
+    """Load Markdown and PDF files with validated metadata (without cache)."""
     directory = Path(knowledge_dir) if knowledge_dir else DEFAULT_KNOWLEDGE_DIR
-
-    if not directory.exists():
-        raise FileNotFoundError(f"Knowledge directory does not exist: {directory}")
-
-    paths = sorted(
-        path
-        for path in directory.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".md", ".pdf"}
-    )
+    paths = _knowledge_paths(directory)
     if not paths and not allow_empty:
         raise FileNotFoundError(
             f"No Markdown or PDF documents found in: {directory}"
@@ -537,13 +553,7 @@ def load_knowledge_documents(
     documents = []
     for path in paths:
         source_name = path.relative_to(directory).as_posix()
-        if path.suffix.lower() == ".pdf":
-            documents.extend(_load_pdf_documents(path, source_name))
-            continue
-
-        content = path.read_text(encoding="utf-8")
-        metadata, body = _parse_markdown_frontmatter(content, source_name)
-        documents.append(Document(page_content=body, metadata=metadata))
+        documents.extend(_load_knowledge_source(path, source_name))
 
     return documents
 
@@ -580,6 +590,59 @@ def create_embeddings(model_name: str | None = None) -> Embeddings:
     )
 
 
+def _source_processing_config(chunk_size: int, chunk_overlap: int) -> dict:
+    """Bump loader_version when extraction/normalization/splitting rules change."""
+    from importlib.metadata import version
+
+    return {
+        "loader_version": 1, "chunk_size": chunk_size, "chunk_overlap": chunk_overlap,
+        "pypdf_version": version("pypdf"),
+        "text_splitters_version": version("langchain-text-splitters"),
+    }
+
+
+def _prepare_source_chunks(
+    paths: list[Path], directory: Path, collection: Any, previous: dict, config: dict,
+    *, force_rebuild: bool,
+) -> tuple[list[Document], dict, int, int]:
+    """Skip unchanged files while restoring their chunks for hybrid retrieval."""
+    chunks, sources = [], {}
+    processed = skipped = 0
+    cached_sources = previous.get("sources", {})
+    if not isinstance(cached_sources, dict):
+        cached_sources = {}
+    can_skip = (not force_rebuild and previous.get("index_version") == INDEX_VERSION
+                and previous.get("source_processing") == config)
+    for path in paths:
+        source = path.relative_to(directory).as_posix()
+        dependencies = [path]
+        if path.suffix.lower() == ".pdf":
+            dependencies.append(_pdf_metadata_path(path))
+        fingerprint = source_fingerprint(dependencies)
+        cached = cached_sources.get(document_id(source))
+        restored = None
+        if (can_skip and isinstance(cached, dict) and cached.get("source") == source
+                and cached.get("file_fingerprint") == fingerprint):
+            restored = restore_source_chunks(collection, cached, previous)
+        if restored is not None:
+            chunks.extend(restored)
+            sources[document_id(source)] = cached
+            skipped += 1
+            continue
+
+        documents = _load_knowledge_source(path, source)
+        source_chunks = split_documents(documents, config["chunk_size"], config["chunk_overlap"])
+        # Do not publish a fingerprint for bytes that changed while being read.
+        if source_fingerprint(dependencies) != fingerprint:
+            raise RuntimeError(f"Source changed during ingestion; retry: {source}")
+        records = source_records(documents, source_chunks)
+        records[document_id(source)]["file_fingerprint"] = fingerprint
+        sources.update(records)
+        chunks.extend(source_chunks)
+        processed += 1
+    return chunks, sources, processed, skipped
+
+
 def _prepare_knowledge_index(
     knowledge_dir: str | Path | None = None,
     embeddings: Embeddings | None = None,
@@ -595,18 +658,14 @@ def _prepare_knowledge_index(
     knowledge_directory = (
         Path(knowledge_dir) if knowledge_dir else DEFAULT_KNOWLEDGE_DIR
     )
-    documents = load_knowledge_documents(knowledge_directory, allow_empty=True)
-    chunks = split_documents(documents, chunk_size, chunk_overlap)
+    paths = _knowledge_paths(knowledge_directory)
+    if chunk_size <= 0 or chunk_overlap < 0 or chunk_overlap >= chunk_size:
+        raise ValueError("chunk_size must be positive and chunk_overlap between zero and chunk_size.")
+    config = _source_processing_config(chunk_size, chunk_overlap)
     embedding_function = embeddings
     if require_embedding_function and embedding_function is None:
         embedding_function = create_embeddings()
     embedding_identity = _embedding_identity(embeddings)
-    signature = _index_signature(
-        chunks,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        embedding_identity=embedding_identity,
-    )
 
     index_directory = Path(
         persist_directory
@@ -618,8 +677,21 @@ def _prepare_knowledge_index(
     from chromadb import PersistentClient
 
     client = PersistentClient(path=str(index_directory))
+    collection = client.get_or_create_collection(
+        name=collection_name, embedding_function=None,
+        configuration={"hnsw": {"space": "cosine"}},
+    )
+    chunks, sources, processed, skipped = _prepare_source_chunks(
+        paths, knowledge_directory, collection, read_index_manifest(manifest_path), config,
+        force_rebuild=force_rebuild,
+    )
+    signature = _index_signature(
+        chunks, chunk_size=chunk_size, chunk_overlap=chunk_overlap,
+        embedding_identity=embedding_identity,
+    )
     changes = synchronize_index(
-        client=client, collection_name=collection_name, documents=documents, chunks=chunks,
+        client=client, collection_name=collection_name, sources=sources, chunks=chunks,
+        processing_config=config, processed_sources=processed, skipped_sources=skipped,
         manifest_path=manifest_path, signature=signature, embedding_identity=embedding_identity,
         chunk_size=chunk_size, chunk_overlap=chunk_overlap, embeddings=embedding_function,
         embedding_factory=create_embeddings, force_rebuild=force_rebuild,
@@ -633,7 +705,7 @@ def _prepare_knowledge_index(
         knowledge_directory=knowledge_directory,
         persist_directory=index_directory,
         collection_name=collection_name,
-        documents=documents,
+        document_count=sum(record["document_count"] for record in sources.values()),
         chunks=chunks,
         manifest_path=manifest_path,
         rebuilt=changes.rebuilt,
@@ -666,7 +738,7 @@ def ingest_knowledge_base(
         knowledge_directory=prepared.knowledge_directory,
         persist_directory=prepared.persist_directory,
         collection_name=prepared.collection_name,
-        document_count=len(prepared.documents),
+        document_count=prepared.document_count,
         chunk_count=len(prepared.chunks),
         rebuilt=prepared.rebuilt,
         manifest_path=prepared.manifest_path,

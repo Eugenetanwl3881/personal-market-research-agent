@@ -346,3 +346,24 @@ HF_HUB_OFFLINE=1 python -m market_research.evaluate \
 
 The first index command may migrate an older index; the second should reuse it.
 Offline mode requires the local embedding model to be cached already.
+
+### Unchanged-source processing cache
+
+File/sidecar fingerprints now allow extraction and splitting to be skipped.
+The first run enriches an older version-2 manifest: five sources processed,
+zero texts embedded, and no chunk writes for the current corpus. The next run
+reports zero sources processed, five skipped, and all 1,575 chunks unchanged.
+Cached chunks retain their manifest order for keyword retrieval and PDF context.
+
+`evaluations/results/retrieval_after_source_skipping.json` records the same
+dataset, index signature, passage text/source/page ordering, outcomes, and metrics
+as `retrieval_after_incremental_ingestion.json`: 14/15 with all twelve answerable
+cases passing. The strict future-price failure remains. All 145 automated tests
+pass, including loader/splitter bypass, keyword search over cached chunks,
+PDF/sidecar invalidation, cache recovery, and processing-configuration changes.
+No answer-model evaluation was needed for this processing-cache change.
+
+```bash
+HF_HUB_OFFLINE=1 python -m market_research.evaluate \
+  --output evaluations/results/retrieval_after_source_skipping.json
+```
