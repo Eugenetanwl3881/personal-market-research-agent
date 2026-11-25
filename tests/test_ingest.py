@@ -78,3 +78,4 @@ def test_ingest_reports_incremental_action(monkeypatch, capsys, tmp_path, change
     assert f"{action} knowledge index." in output
     assert "Unique texts embedded: 0" in output
     assert f"Metadata updates: {int(changed)}" in output
+    assert "Sources with metadata refreshed: 0" in output

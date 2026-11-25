@@ -286,7 +286,7 @@ def test_only_changed_or_new_sources_are_loaded(corpus, monkeypatch):
     assert report.changes.skipped_sources == 1
 
 
-@pytest.mark.parametrize("invalidation", ["force", "chunking", "loader", "legacy", "missing_chunk", "metadata"])
+@pytest.mark.parametrize("invalidation", ["force", "chunking", "loader", "legacy", "missing_chunk", "fingerprint_migration"])
 def test_cache_invalidation_reprocesses_sources(corpus, monkeypatch, invalidation):
     _, write, ingest, records = corpus
     write("apple.md")
@@ -296,20 +296,20 @@ def test_cache_invalidation_reprocesses_sources(corpus, monkeypatch, invalidatio
         kwargs["force_rebuild"] = True
     elif invalidation == "chunking":
         kwargs.update(chunk_size=80, chunk_overlap=0)
-    elif invalidation in {"loader", "legacy"}:
+    elif invalidation in {"loader", "legacy", "fingerprint_migration"}:
         manifest = json.loads(first.manifest_path.read_text())
         if invalidation == "loader":
             manifest["source_processing"]["loader_version"] = 0
-        else:
+        elif invalidation == "legacy":
             manifest.pop("source_processing")
+        else:
+            for source in manifest["sources"].values():
+                source.pop("content_fingerprint")
         first.manifest_path.write_text(json.dumps(manifest))
     elif invalidation == "missing_chunk":
         PersistentClient(path=str(first.persist_directory)).get_collection(
             first.collection_name, embedding_function=None,
         ).delete(ids=records()["ids"])
-    else:
-        # Stage one intentionally reprocesses any metadata change too.
-        write("apple.md", metadata="ticker: AAPL\nlast_reviewed: 2026-11-25\n")
     loaded = []
     loader = rag._load_knowledge_source
 
@@ -323,7 +323,7 @@ def test_cache_invalidation_reprocesses_sources(corpus, monkeypatch, invalidatio
     assert loaded == ["apple.md"]
     assert report.changes.processed_sources == 1
     assert report.changes.skipped_sources == 0
-    if invalidation in {"legacy", "loader", "metadata", "chunking"}:
+    if invalidation in {"legacy", "loader", "chunking", "fingerprint_migration"}:
         assert model.texts == []
 
 

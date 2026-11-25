@@ -367,3 +367,19 @@ No answer-model evaluation was needed for this processing-cache change.
 HF_HUB_OFFLINE=1 python -m market_research.evaluate \
   --output evaluations/results/retrieval_after_source_skipping.json
 ```
+
+### Metadata-only refresh
+
+PDF sidecar-only and Markdown frontmatter-only edits now refresh validated
+metadata on cached chunks without extraction, splitting, or document embeddings.
+Integration tests verify unchanged IDs/vectors, removed optional fields, updated
+ticker/year filters in vector and BM25 retrieval, citation URL changes, and
+invalid metadata leaving the manifest/records untouched. All 147 tests pass.
+
+Existing source records need one processing pass to save a separate content
+fingerprint. The real five-source migration embedded zero texts and changed no
+chunk records; the following run skipped all five. The saved real retrieval run
+`evaluations/results/retrieval_after_metadata_refresh.json` matches the preceding
+run's dataset, index signature, ordered evidence, outcomes, and metrics: 14/15,
+all twelve answerable cases passing, and the same strict future-price failure.
+No live answer-model evaluation was run for this metadata-processing change.

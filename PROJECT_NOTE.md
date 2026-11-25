@@ -93,7 +93,7 @@ steps
 | `data.py` | Quote/news retrieval, timestamps, freshness, and source normalization. |
 | `calculations.py` | Exact share-cost arithmetic and input validation. |
 | `graph.py` | Nodes, state updates, conditional routing, RAG retrieval, and partial-answer fallbacks. |
-| `rag.py` | Markdown/PDF loading, validated metadata, processing configuration, unchanged-source skipping, chunking, local embeddings, and hybrid retrieval. |
+| `rag.py` | Markdown/PDF loading, validated metadata, unchanged-source skipping, metadata-only refresh, chunking, local embeddings, and hybrid retrieval. |
 | `indexing.py` | Document/chunk identity, file fingerprints, cached chunk validation/restoration, exact-text vector reuse, incremental Chroma writes, and manifest persistence. |
 | `ingest.py` | Explicit knowledge-index preparation and incremental change reporting. |
 | `sources.py` / `fetch.py` | Official report download adapters and CLI for Apple and the verified Microsoft fiscal-2025 PDF, with generated metadata. |

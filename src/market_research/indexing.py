@@ -81,6 +81,7 @@ class IndexChanges:
     duplicate_sources: int = 0
     processed_sources: int = 0
     skipped_sources: int = 0
+    metadata_only_sources: int = 0
 
 
 def read_index_manifest(path: Path) -> dict:
@@ -127,14 +128,22 @@ def source_records(documents: list[Document], chunks: list[Document]) -> dict:
     }
 
 
-def source_fingerprint(paths: list[Path]) -> str:
-    """Hash source/sidecar bytes, without parsing their contents or using mtimes."""
+def source_fingerprints(paths: list[Path]) -> dict[str, str]:
+    """Hash all dependencies and the primary source separately in one read pass."""
     fingerprints = []
     for path in paths:
         with path.open("rb") as source:
             fingerprint = hashlib.file_digest(source, "sha256").hexdigest()
         fingerprints.append({"name": path.name, "sha256": fingerprint})
-    return _digest(fingerprints)
+    return {
+        "file_fingerprint": _digest(fingerprints),
+        "content_fingerprint": fingerprints[0]["sha256"],
+    }
+
+
+def source_fingerprint(paths: list[Path]) -> str:
+    """Combined dependency fingerprint, used to detect edits during processing."""
+    return source_fingerprints(paths)["file_fingerprint"]
 
 
 def restore_source_chunks(collection: Any, record: dict, manifest: dict) -> list[Document] | None:
@@ -184,6 +193,7 @@ def synchronize_index(
     processing_config: dict,
     processed_sources: int,
     skipped_sources: int,
+    metadata_only_sources: int,
     manifest_path: Path,
     signature: str,
     embedding_identity: str,
@@ -307,4 +317,5 @@ def synchronize_index(
         embedded_texts=len(missing_hashes), reused_embeddings=len(chunks) - len(missing_hashes),
         duplicate_chunks=duplicate_chunks, duplicate_sources=duplicate_sources,
         processed_sources=processed_sources, skipped_sources=skipped_sources,
+        metadata_only_sources=metadata_only_sources,
     )

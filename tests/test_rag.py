@@ -364,7 +364,7 @@ def test_load_knowledge_documents_requires_pdf_sidecar(tmp_path: Path):
         load_knowledge_documents(tmp_path)
 
 
-def test_unchanged_pdf_skips_extraction_but_pdf_or_sidecar_changes_reprocess(tmp_path, monkeypatch):
+def test_pdf_metadata_refresh_skips_extraction_but_content_changes_reprocess(tmp_path, monkeypatch):
     from market_research import rag
 
     knowledge = tmp_path / "knowledge"
@@ -394,20 +394,110 @@ def test_unchanged_pdf_skips_extraction_but_pdf_or_sidecar_changes_reprocess(tmp
     sidecar.write_text(sidecar.read_text() + "last_reviewed: 2026-11-25\n")
     model = CountingEmbeddings()
     updated = ingest(model)
-    assert calls == ["report.pdf"]
-    assert updated.changes.processed_sources == 1
+    assert calls == []
+    assert updated.changes.processed_sources == 0
+    assert updated.changes.metadata_only_sources == 1
     assert updated.changes.metadata_updates == 2
     assert model.document_calls == 0
 
     write_text_pdf(pdf, ["Apple updated hardware business.", "Apple services business."])
     model = CountingEmbeddings()
     changed = ingest(model)
-    assert calls == ["report.pdf", "report.pdf"]
+    assert calls == ["report.pdf"]
     assert changed.changes.embedded_texts == 1
 
     sidecar.unlink()
     with pytest.raises(FileNotFoundError, match="requires a YAML sidecar"):
         ingest(CountingEmbeddings())
+
+
+@pytest.mark.parametrize("source_format", ["pdf", "md"])
+def test_metadata_only_refresh_preserves_vectors_and_updates_retrieval(tmp_path, monkeypatch, source_format):
+    from chromadb import PersistentClient
+    from market_research import rag
+
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    path = knowledge / f"report.{source_format}"
+    body = "Apple hardware business and services."
+    if source_format == "pdf":
+        write_text_pdf(path, [body])
+        metadata_path = path.with_suffix(".yaml")
+    else:
+        metadata_path = path
+
+    def write_metadata(text):
+        metadata_path.write_text(text if source_format == "pdf" else f"---\n{text}---\n\n{body}")
+
+    write_metadata("ticker: AAPL\ncompany: Old company\ndocument_type: annual_report\n"
+                   "fiscal_year: 2025\nsource_url: https://example.com/old\n")
+    first = ingest_knowledge_base(knowledge, CountingEmbeddings(), persist_directory=tmp_path / "index")
+    collection = PersistentClient(path=str(first.persist_directory)).get_collection(
+        first.collection_name, embedding_function=None,
+    )
+    before = collection.get(include=["embeddings", "metadatas", "documents"])
+    write_metadata("ticker: MSFT\ndocument_type: annual_report\nfiscal_year: 2024\n"
+                   "source_url: https://example.com/new\n")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Metadata-only edit extracted or split source text")
+
+    monkeypatch.setattr(rag, "_load_knowledge_source", forbidden)
+    monkeypatch.setattr(rag, "split_documents", forbidden)
+    model = CountingEmbeddings()
+    refreshed = ingest_knowledge_base(knowledge, model, persist_directory=first.persist_directory)
+    after = collection.get(include=["embeddings", "metadatas", "documents"])
+    assert refreshed.changes.metadata_only_sources == 1
+    assert refreshed.changes.processed_sources == refreshed.changes.skipped_sources == 0
+    assert refreshed.changes.metadata_updates == 1
+    assert before["ids"] == after["ids"]
+    assert before["documents"] == after["documents"]
+    assert before["embeddings"].tolist() == after["embeddings"].tolist()
+    assert "company" not in after["metadatas"][0]
+    assert after["metadatas"][0]["source_url"] == "https://example.com/new"
+    assert collection.get(where={"ticker_scope": "AAPL"})["ids"] == []
+    assert collection.get(where={"ticker_scope": "MSFT"})["ids"] == after["ids"]
+    retriever = build_knowledge_retriever(
+        knowledge, model, persist_directory=first.persist_directory, tickers=["MSFT"],
+    )
+    # Exercise vector filtering using the same unchanged vector with NEW metadata.
+    assert retriever.vector_store.similarity_search(
+        "Apple hardware", filter={"fiscal_year": 2024}, k=1,
+    )[0].metadata["ticker"] == "MSFT"
+    assert retriever.vector_store.similarity_search(
+        "Apple hardware", filter={"fiscal_year": 2025}, k=1,
+    ) == []
+    # Then require keyword-only retrieval to prove BM25 received refreshed fields.
+    monkeypatch.setattr(retriever.vector_store, "similarity_search_with_relevance_scores", lambda *a, **kw: [])
+    result = retriever.invoke("2024 annual report hardware business")
+    assert result[0].metadata["ticker"] == "MSFT"
+    assert result[0].metadata["fiscal_year"] == 2024
+    assert result[0].metadata["source_url"] == "https://example.com/new"
+    assert retriever.invoke("2025 annual report hardware business") == []
+    assert model.document_calls == 0
+    again = ingest_knowledge_base(knowledge, model, persist_directory=first.persist_directory)
+    assert again.changes.skipped_sources == 1
+    assert again.changes.metadata_only_sources == 0
+
+    # Omitting ticker/year/citation fields must remove stale filtering metadata.
+    write_metadata("document_type: company_overview\n")
+    generic = ingest_knowledge_base(knowledge, model, persist_directory=first.persist_directory)
+    current = collection.get(include=["metadatas"])["metadatas"][0]
+    assert generic.changes.metadata_only_sources == 1
+    assert current["ticker_scope"] == "__generic__"
+    assert not {"ticker", "fiscal_year", "source_url", "company"}.intersection(current)
+    for key in ("start_index", "document_id", "content_hash", "page_number", "page_count"):
+        if key in before["metadatas"][0]:
+            assert current[key] == before["metadatas"][0][key]
+
+    # Invalid replacement metadata must fail before any records/manifest change.
+    manifest = first.manifest_path.read_bytes()
+    write_metadata("document_type: annual_report\nfiscal_year: invalid\n")
+    with pytest.raises(ValueError):
+        ingest_knowledge_base(knowledge, model, persist_directory=first.persist_directory)
+    assert first.manifest_path.read_bytes() == manifest
+    assert collection.get(include=["metadatas"])["metadatas"][0] == current
+    assert model.document_calls == 0
 
 
 def test_split_documents_preserves_metadata_and_creates_chunks():

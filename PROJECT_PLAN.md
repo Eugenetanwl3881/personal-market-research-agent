@@ -18,6 +18,8 @@
   stale-record removal, and per-run ingestion counters.
 - File/sidecar fingerprints skip unchanged-source extraction and splitting;
   cached chunks are restored for hybrid retrieval in their original order.
+- Sidecar-only PDF and frontmatter-only Markdown edits refresh validated chunk
+  metadata without extraction/splitting or new embeddings, including removed fields.
 - Standalone `market-research-index` command for explicit knowledge ingestion.
 - Deterministic RAG retrieval evaluation cases for company, methodology, and ticker filtering.
 - Real-embedding retrieval evaluation command with fifteen labelled cases, saved evidence, and baseline metrics.

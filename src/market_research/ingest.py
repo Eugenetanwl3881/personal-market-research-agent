@@ -66,6 +66,7 @@ def main() -> None:
     print(f"- Source files: {report.changes.source_count}")
     print(f"- Sources processed: {report.changes.processed_sources}")
     print(f"- Sources skipped: {report.changes.skipped_sources}")
+    print(f"- Sources with metadata refreshed: {report.changes.metadata_only_sources}")
     print(f"- Chunks added: {report.changes.added_chunks}")
     print(f"- Metadata updates: {report.changes.metadata_updates}")
     print(f"- Chunks deleted: {report.changes.deleted_chunks}")

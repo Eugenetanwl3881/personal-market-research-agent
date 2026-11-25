@@ -205,6 +205,9 @@ The command reports added, metadata-updated, deleted, and unchanged chunks,
 unique texts embedded, reused embedding assignments, and duplicate counts.
 `Sources processed` counts files sent through extraction/loading and splitting;
 `Sources skipped` counts unchanged files whose chunks were restored from Chroma.
+`Sources with metadata refreshed` counts content-preserving edits handled without
+extraction or splitting. The chunk-level `Metadata updates` count reports actual
+record changes; YAML comments or formatting edits can require none.
 PDF pages are counted under `Documents`; `Source files` counts the source files.
 The overall signature still records corpus/configuration changes for evaluations;
 a changed signature alone no longer forces a full rebuild.
@@ -219,12 +222,21 @@ PDF fingerprints include the selected YAML sidecar's name and bytes. When the
 fingerprint and processing configuration match, it skips extraction and splitting,
 restoring the source's chunks from Chroma in their original manifest order.
 These restored chunks remain available for BM25 and PDF context expansion.
-New/changed sources follow the existing validated loader and splitter. This
-first stage also reprocesses metadata-only edits; their unchanged text still
-reuses embeddings. Source deletions continue to remove obsolete records.
+New/content-changed sources follow the existing validated loader and splitter.
+Source deletions continue to remove obsolete records.
 
-Older version-2 manifests need one processing pass to save fingerprints and page
-counts, without forcing new embeddings. Missing/damaged cached chunks fall back
+For PDFs, a separate hash of the PDF bytes proves the content file is unchanged
+when only the sidecar changes. The sidecar is validated and its declared metadata
+replaces the old declared fields on restored chunks, preserving text, IDs, page
+numbers, offsets, and vectors. Markdown frontmatter edits follow the same path
+when the parsed body text hash matches; this reads/parses Markdown but skips
+splitting. Omitted optional fields are removed, and `ticker_scope` is recomputed.
+Both vector filtering and BM25 receive the refreshed metadata. Invalid metadata
+fails before synchronization. Chunking/loader changes and `--force` still take
+the normal processing path even if only metadata was edited.
+
+Older version-2 manifests need one processing pass to save separate content/file
+fingerprints and page counts, without forcing new embeddings. Missing/damaged cached chunks fall back
 to source processing. Chunking settings, loader version, PDF/splitter package
 versions, and `--force` invalidate the skip path. Bump `loader_version` in
 `_source_processing_config()` when extraction or normalization rules change.

@@ -17,11 +17,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .indexing import (
     INDEX_VERSION,
     IndexChanges,
+    content_hash,
     document_id,
     identify_chunks,
     read_index_manifest,
     restore_source_chunks,
     source_fingerprint,
+    source_fingerprints,
     source_records,
     stable_chunk_id as _stable_chunk_id,
     synchronize_index,
@@ -451,6 +453,15 @@ def _pdf_metadata_path(pdf_path: Path) -> Path:
     return existing[0]
 
 
+def _load_pdf_metadata(pdf_path: Path, source_name: str) -> dict[str, Any]:
+    """Validate the sidecar without opening or extracting the PDF."""
+    metadata_path = _pdf_metadata_path(pdf_path)
+    return _build_document_metadata(
+        _load_yaml_mapping(metadata_path.read_text(encoding="utf-8"), str(metadata_path)),
+        source_name,
+    )
+
+
 def _load_pdf_documents(pdf_path: Path, source_name: str) -> list[Document]:
     """Extract one Document per non-empty PDF page with page metadata."""
     try:
@@ -461,14 +472,7 @@ def _load_pdf_documents(pdf_path: Path, source_name: str) -> list[Document]:
             "dependencies before loading PDF knowledge documents."
         ) from exc
 
-    metadata_path = _pdf_metadata_path(pdf_path)
-    metadata = _build_document_metadata(
-        _load_yaml_mapping(
-            metadata_path.read_text(encoding="utf-8"),
-            str(metadata_path),
-        ),
-        source_name,
-    )
+    metadata = _load_pdf_metadata(pdf_path, source_name)
     reader = PdfReader(str(pdf_path))
     page_count = len(reader.pages)
     documents = []
@@ -604,10 +608,10 @@ def _source_processing_config(chunk_size: int, chunk_overlap: int) -> dict:
 def _prepare_source_chunks(
     paths: list[Path], directory: Path, collection: Any, previous: dict, config: dict,
     *, force_rebuild: bool,
-) -> tuple[list[Document], dict, int, int]:
+) -> tuple[list[Document], dict, int, int, int]:
     """Skip unchanged files while restoring their chunks for hybrid retrieval."""
     chunks, sources = [], {}
-    processed = skipped = 0
+    processed = skipped = metadata_only = 0
     cached_sources = previous.get("sources", {})
     if not isinstance(cached_sources, dict):
         cached_sources = {}
@@ -618,10 +622,12 @@ def _prepare_source_chunks(
         dependencies = [path]
         if path.suffix.lower() == ".pdf":
             dependencies.append(_pdf_metadata_path(path))
-        fingerprint = source_fingerprint(dependencies)
+        fingerprints = source_fingerprints(dependencies)
+        fingerprint = fingerprints["file_fingerprint"]
         cached = cached_sources.get(document_id(source))
         restored = None
         if (can_skip and isinstance(cached, dict) and cached.get("source") == source
+                and isinstance(cached.get("content_fingerprint"), str)
                 and cached.get("file_fingerprint") == fingerprint):
             restored = restore_source_chunks(collection, cached, previous)
         if restored is not None:
@@ -630,17 +636,56 @@ def _prepare_source_chunks(
             skipped += 1
             continue
 
+        if (can_skip and isinstance(cached, dict) and cached.get("source") == source
+                and isinstance(cached.get("content_fingerprint"), str)):
+            refreshed = _metadata_only_chunks(path, source, fingerprints, cached, previous, collection)
+            if refreshed is not None:
+                if source_fingerprint(dependencies) != fingerprint:
+                    raise RuntimeError(f"Source changed during ingestion; retry: {source}")
+                chunks.extend(refreshed)
+                sources[document_id(source)] = {**cached, **fingerprints}
+                metadata_only += 1
+                continue
+
         documents = _load_knowledge_source(path, source)
         source_chunks = split_documents(documents, config["chunk_size"], config["chunk_overlap"])
         # Do not publish a fingerprint for bytes that changed while being read.
         if source_fingerprint(dependencies) != fingerprint:
             raise RuntimeError(f"Source changed during ingestion; retry: {source}")
         records = source_records(documents, source_chunks)
-        records[document_id(source)]["file_fingerprint"] = fingerprint
+        if path.suffix.lower() == ".md":
+            fingerprints["content_fingerprint"] = content_hash(documents[0].page_content)
+        records[document_id(source)].update(fingerprints)
         sources.update(records)
         chunks.extend(source_chunks)
         processed += 1
-    return chunks, sources, processed, skipped
+    return chunks, sources, processed, skipped, metadata_only
+
+
+def _metadata_only_chunks(
+    path: Path, source: str, fingerprints: dict, cached: dict, previous: dict, collection: Any,
+) -> list[Document] | None:
+    """Refresh declared metadata only after proving that indexed content is unchanged."""
+    if path.suffix.lower() == ".pdf":
+        if fingerprints["content_fingerprint"] != cached["content_fingerprint"]:
+            return None
+        metadata = _load_pdf_metadata(path, source)
+    else:
+        metadata, body = _parse_markdown_frontmatter(path.read_text(encoding="utf-8"), source)
+        fingerprints["content_fingerprint"] = content_hash(body)
+        if fingerprints["content_fingerprint"] != cached["content_fingerprint"]:
+            return None
+    restored = restore_source_chunks(collection, cached, previous)
+    if restored is None:
+        return None
+    # Remove all old declared fields, including optional ones now omitted. Keep
+    # structural fields such as page, offset, content hash and record identity.
+    declared = set(KnowledgeDocumentMetadata.model_fields) | {"source", "ticker_scope"}
+    return [Document(
+        id=chunk.id, page_content=chunk.page_content,
+        metadata={**{key: value for key, value in chunk.metadata.items() if key not in declared},
+                  **metadata},
+    ) for chunk in restored]
 
 
 def _prepare_knowledge_index(
@@ -681,7 +726,7 @@ def _prepare_knowledge_index(
         name=collection_name, embedding_function=None,
         configuration={"hnsw": {"space": "cosine"}},
     )
-    chunks, sources, processed, skipped = _prepare_source_chunks(
+    chunks, sources, processed, skipped, metadata_only = _prepare_source_chunks(
         paths, knowledge_directory, collection, read_index_manifest(manifest_path), config,
         force_rebuild=force_rebuild,
     )
@@ -692,6 +737,7 @@ def _prepare_knowledge_index(
     changes = synchronize_index(
         client=client, collection_name=collection_name, sources=sources, chunks=chunks,
         processing_config=config, processed_sources=processed, skipped_sources=skipped,
+        metadata_only_sources=metadata_only,
         manifest_path=manifest_path, signature=signature, embedding_identity=embedding_identity,
         chunk_size=chunk_size, chunk_overlap=chunk_overlap, embeddings=embedding_function,
         embedding_factory=create_embeddings, force_rebuild=force_rebuild,
