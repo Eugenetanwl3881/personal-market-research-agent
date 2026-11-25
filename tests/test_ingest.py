@@ -1,7 +1,10 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 from market_research import ingest
+from market_research.indexing import IndexChanges
 from market_research.rag import KnowledgeIndexReport
 
 
@@ -58,3 +61,20 @@ def test_ingest_main_passes_options_and_reports_result(monkeypatch, capsys, tmp_
     assert "Rebuilt knowledge index." in output
     assert "- Documents: 2" in output
     assert "- Chunks: 4" in output
+
+
+@pytest.mark.parametrize("changed,action", [(True, "Updated"), (False, "Reused")])
+def test_ingest_reports_incremental_action(monkeypatch, capsys, tmp_path, changed, action):
+    report = KnowledgeIndexReport(
+        knowledge_directory=tmp_path, persist_directory=tmp_path,
+        collection_name="test_collection", document_count=1, chunk_count=1,
+        rebuilt=False, manifest_path=tmp_path / "manifest.json",
+        changes=IndexChanges(changed=changed, metadata_updates=int(changed)),
+    )
+    monkeypatch.setattr(ingest, "ingest_knowledge_base", lambda **kwargs: report)
+    monkeypatch.setattr(sys, "argv", ["market-research-index"])
+    ingest.main()
+    output = capsys.readouterr().out
+    assert f"{action} knowledge index." in output
+    assert "Unique texts embedded: 0" in output
+    assert f"Metadata updates: {int(changed)}" in output

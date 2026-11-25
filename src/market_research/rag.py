@@ -3,7 +3,7 @@ import json
 import os
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from math import log
 from pathlib import Path
@@ -13,6 +13,14 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.retrievers import BaseRetriever
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .indexing import (
+    INDEX_VERSION,
+    IndexChanges,
+    identify_chunks,
+    stable_chunk_id as _stable_chunk_id,
+    synchronize_index,
+)
 
 
 DEFAULT_KNOWLEDGE_DIR = (
@@ -24,7 +32,6 @@ DEFAULT_COLLECTION_NAME = "market_research_knowledge"
 DEFAULT_RETRIEVAL_K = 2
 DEFAULT_CANDIDATE_K = 20
 DEFAULT_RELEVANCE_THRESHOLD = 0.45
-INDEX_VERSION = 1
 GENERIC_TICKER_SCOPE = "__generic__"
 
 # Common question words add noise to keyword matching. Keep content words,
@@ -89,6 +96,7 @@ class KnowledgeIndexReport:
     chunk_count: int
     rebuilt: bool
     manifest_path: Path
+    changes: IndexChanges = field(default_factory=IndexChanges)
 
 
 @dataclass
@@ -103,6 +111,7 @@ class _PreparedKnowledgeIndex:
     chunks: list[Document]
     manifest_path: Path
     rebuilt: bool
+    changes: IndexChanges
 
 
 class KnowledgeDocumentMetadata(BaseModel):
@@ -299,7 +308,17 @@ def _embedding_identity(embeddings: Embeddings | None) -> str:
         return os.getenv("RAG_EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
 
     embedding_type = type(embeddings)
-    return f"{embedding_type.__module__}.{embedding_type.__qualname__}"
+    identity = f"{embedding_type.__module__}.{embedding_type.__qualname__}"
+    # Include the local model/settings when exposed by an embedding wrapper.
+    # Do not serialize the whole instance: it may contain credentials or counters.
+    configuration = {
+        key: getattr(embeddings, key)
+        for key in ("model_name", "encode_kwargs")
+        if hasattr(embeddings, key)
+    }
+    if configuration:
+        identity += ":" + json.dumps(configuration, sort_keys=True, default=str)
+    return identity
 
 
 def _index_signature(
@@ -333,53 +352,12 @@ def _index_signature(
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _read_index_signature(manifest_path: Path) -> str | None:
-    """Read an existing index signature, returning None if unavailable."""
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    signature = manifest.get("index_signature")
-    return signature if isinstance(signature, str) else None
-
-
-def _has_expected_chunks(vector_store: Any, chunks: list[Document]) -> bool:
-    """Check that a matching collection still contains every expected chunk."""
-    expected_ids = {_stable_chunk_id(chunk) for chunk in chunks}
-    try:
-        stored_ids = set(vector_store.get(include=[])["ids"])
-    except Exception:
-        return False
-    return stored_ids == expected_ids
-
-
-def _write_index_manifest(
-    manifest_path: Path,
-    *,
-    signature: str,
-    chunk_count: int,
-) -> None:
-    """Write the metadata needed to decide whether an index can be reused."""
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "index_version": INDEX_VERSION,
-                "index_signature": signature,
-                "chunk_count": chunk_count,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-
 def _create_persistent_vector_store(
     persist_directory: Path,
     collection_name: str,
     embeddings: Embeddings | None,
+    *,
+    client: Any | None = None,
 ):
     """Create or open a local Chroma collection using cosine distance."""
     from langchain_chroma import Chroma
@@ -389,22 +367,8 @@ def _create_persistent_vector_store(
         embedding_function=embeddings,
         persist_directory=str(persist_directory),
         collection_configuration={"hnsw": {"space": "cosine"}},
+        client=client,
     )
-
-
-def _stable_chunk_id(chunk: Document) -> str:
-    """Create a deterministic ID so the persisted index is reproducible."""
-    serialized = json.dumps(
-        {
-            "content": chunk.page_content,
-            "metadata": chunk.metadata,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _load_yaml_mapping(content: str, source_name: str) -> dict[str, Any]:
@@ -551,6 +515,8 @@ def _load_pdf_documents(pdf_path: Path, source_name: str) -> list[Document]:
 
 def load_knowledge_documents(
     knowledge_dir: str | Path | None = None,
+    *,
+    allow_empty: bool = False,
 ) -> list[Document]:
     """Load Markdown and PDF files with validated metadata."""
     directory = Path(knowledge_dir) if knowledge_dir else DEFAULT_KNOWLEDGE_DIR
@@ -563,7 +529,7 @@ def load_knowledge_documents(
         for path in directory.rglob("*")
         if path.is_file() and path.suffix.lower() in {".md", ".pdf"}
     )
-    if not paths:
+    if not paths and not allow_empty:
         raise FileNotFoundError(
             f"No Markdown or PDF documents found in: {directory}"
         )
@@ -600,7 +566,7 @@ def split_documents(
         chunk_overlap=chunk_overlap,
         add_start_index=True,
     )
-    return splitter.split_documents(documents)
+    return identify_chunks(splitter.split_documents(documents))
 
 
 def create_embeddings(model_name: str | None = None) -> Embeddings:
@@ -629,7 +595,7 @@ def _prepare_knowledge_index(
     knowledge_directory = (
         Path(knowledge_dir) if knowledge_dir else DEFAULT_KNOWLEDGE_DIR
     )
-    documents = load_knowledge_documents(knowledge_directory)
+    documents = load_knowledge_documents(knowledge_directory, allow_empty=True)
     chunks = split_documents(documents, chunk_size, chunk_overlap)
     embedding_function = embeddings
     if require_embedding_function and embedding_function is None:
@@ -649,37 +615,18 @@ def _prepare_knowledge_index(
     )
     index_directory.mkdir(parents=True, exist_ok=True)
     manifest_path = _index_manifest_path(index_directory, collection_name)
+    from chromadb import PersistentClient
+
+    client = PersistentClient(path=str(index_directory))
+    changes = synchronize_index(
+        client=client, collection_name=collection_name, documents=documents, chunks=chunks,
+        manifest_path=manifest_path, signature=signature, embedding_identity=embedding_identity,
+        chunk_size=chunk_size, chunk_overlap=chunk_overlap, embeddings=embedding_function,
+        embedding_factory=create_embeddings, force_rebuild=force_rebuild,
+    )
     vector_store = _create_persistent_vector_store(
-        index_directory,
-        collection_name,
-        embedding_function,
+        index_directory, collection_name, embedding_function, client=client,
     )
-
-    index_is_current = (
-        not force_rebuild
-        and _read_index_signature(manifest_path) == signature
-    )
-    if index_is_current:
-        index_is_current = _has_expected_chunks(vector_store, chunks)
-
-    if not index_is_current:
-        if embedding_function is None:
-            embedding_function = create_embeddings()
-        vector_store.delete_collection()
-        vector_store = _create_persistent_vector_store(
-            index_directory,
-            collection_name,
-            embedding_function,
-        )
-        vector_store.add_documents(
-            chunks,
-            ids=[_stable_chunk_id(chunk) for chunk in chunks],
-        )
-        _write_index_manifest(
-            manifest_path,
-            signature=signature,
-            chunk_count=len(chunks),
-        )
 
     return _PreparedKnowledgeIndex(
         vector_store=vector_store,
@@ -689,7 +636,8 @@ def _prepare_knowledge_index(
         documents=documents,
         chunks=chunks,
         manifest_path=manifest_path,
-        rebuilt=not index_is_current,
+        rebuilt=changes.rebuilt,
+        changes=changes,
     )
 
 
@@ -722,6 +670,7 @@ def ingest_knowledge_base(
         chunk_count=len(prepared.chunks),
         rebuilt=prepared.rebuilt,
         manifest_path=prepared.manifest_path,
+        changes=prepared.changes,
     )
 
 

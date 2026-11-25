@@ -35,7 +35,7 @@ The current RAG path is a predictable two-step flow:
 Question → retrieve relevant reference chunks → grounded answer
 ```
 
-The knowledge base is stored in `knowledge/` as Markdown with YAML frontmatter and PDFs with YAML sidecars. The retriever uses local embeddings and a persistent Chroma vector store. By default, the index is stored in `.rag_index/`; set `RAG_INDEX_DIR` to use another local directory. A manifest hashes the source chunks, metadata, chunking settings, embedding identity, and index version, so the index is reused across CLI runs and rebuilt when its inputs change.
+The knowledge base is stored in `knowledge/` as Markdown with YAML frontmatter and PDFs with YAML sidecars. The retriever uses local embeddings and a persistent Chroma vector store. By default, the index is stored in `.rag_index/`; set `RAG_INDEX_DIR` to use another local directory. Ingestion compares individual chunks with stored records, reuses embeddings for identical text, updates metadata, and deletes obsolete records. A manifest records source/chunk identities, content hashes, and embedding compatibility.
 
 Retrieval combines up to 20 vector candidates with up to 20 BM25 keyword candidates, using reciprocal rank fusion to return at most two passages. Keyword ranks have twice the weight of vector ranks. The cosine threshold of 0.45 applies to vector candidates; keyword matches can recover passages missed by vector search. These scores rank evidence and are not probabilities that an answer is correct. Keyword scoring scans the loaded chunks locally, which suits the current small corpus.
 
@@ -158,7 +158,7 @@ market-research-fetch --ticker AAPL --year 2025 --force
 After downloading a report, refresh the persistent index:
 
 ```bash
-market-research-index --force
+market-research-index
 ```
 
 Microsoft fiscal-2025 Form 10-K is also available through the downloader:
@@ -178,6 +178,46 @@ Apple's recent-year discovery behavior is unchanged. Both adapters use the
 existing PDF loader; no format conversion is required.
 
 Use `--force` or `--force-rebuild` to rebuild even when the existing index is current. You can override the source and output locations with `--knowledge-dir` and `--index-dir`. Research queries still check the index automatically, so explicit ingestion is optional but useful when preparing a deployment or verifying the knowledge base.
+
+### Incremental ingestion and identity
+
+| Identity | Based on | Purpose |
+| --- | --- | --- |
+| Document ID | Path relative to the knowledge directory | Keeps a source's identity across content/metadata edits. |
+| Chunk ID | Document ID, PDF page, exact text hash, repeated-text occurrence | Keeps source/page references distinct without depending on mutable offsets. |
+| Content hash | Exact extracted chunk text | Reuses a vector when the same text appears in another source or location. |
+
+An unchanged run embeds no document text. Adding a report embeds only text not
+already represented in the compatible index. Editing a report reuses unchanged
+chunk text, inserts new chunks, updates offsets/metadata, and removes old chunks.
+A metadata-only edit updates Chroma metadata without embedding. Deleting sources
+removes their records, including when the knowledge directory becomes empty.
+Missing directories and invalid source metadata fail before synchronization.
+
+Exact duplicate extracted text shares embedding work, while each source/page
+keeps a separate Chroma record for filtering and citations. A rename changes
+document/chunk IDs, but reuses matching vectors before deleting the old records.
+Duplicate counts describe exact extracted text, not near-duplicate meaning or
+byte-identical PDF files. Reuse draws from currently indexed records; vectors
+for text deleted in an earlier run are not kept in a separate permanent cache.
+
+The command reports added, metadata-updated, deleted, and unchanged chunks,
+unique texts embedded, reused embedding assignments, and duplicate counts.
+PDF pages are counted under `Documents`; `Source files` counts the source files.
+The overall signature still records corpus/configuration changes for evaluations;
+a changed signature alone no longer forces a full rebuild.
+
+The old version-1 manifest needs one full migration rebuild. Changing the
+embedding model, the index identity schema, or using `--force` also rebuilds.
+Custom embedding implementations whose hidden configuration changes must use
+`--force`; exposed `model_name` and `encode_kwargs` are included in compatibility.
+
+Ingestion still reads, extracts, and splits all source files to find changes.
+Only embedding and database writes are incremental. Use one ingestion writer
+per collection. The manifest is replaced atomically after database writes;
+the overall operation is not a database transaction. Interrupted writes can be
+reconciled by rerunning ingestion. Keep the same knowledge root for a collection:
+its relative paths define document identity.
 
 PDF files can be placed anywhere below the knowledge directory. Each PDF requires a same-named YAML sidecar because PDFs do not contain the project’s frontmatter format:
 
@@ -207,11 +247,10 @@ overviews and methodology documents may omit it. Existing annual-report
 frontmatter or sidecars using `document_version: "2025"` must add
 `fiscal_year: 2025`; revise the version label independently. The loader does
 not infer a fiscal year from the revision label, filename, or publication date.
-Metadata changes trigger the normal index rebuild automatically; the current
-implementation rebuilds the whole collection once rather than updating only
-metadata. The original PDF does not need to be downloaded again.
+Metadata changes update stored chunk metadata automatically without reembedding
+unchanged text. The original PDF does not need to be downloaded again.
 
-The loader creates one document per non-empty PDF page and preserves `page_number`, `page_count`, `source`, and `source_format` metadata. Run `market-research-index --force` after adding or changing a PDF. Scanned image-only PDFs are not supported yet because they require OCR.
+The loader creates one document per non-empty PDF page and preserves `page_number`, `page_count`, `source`, and `source_format` metadata. Run `market-research-index` after adding or changing a PDF. Scanned image-only PDFs are not supported yet because they require OCR.
 
 ## Output design
 

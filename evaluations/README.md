@@ -25,7 +25,8 @@ equivalent command. Options include `--cases`, `--output`, `--knowledge-dir`,
 This command runs the real local embedding model and retriever. It shares one
 loaded model/index across questions and directly supplies each case's tickers.
 It does not evaluate request parsing or call OpenCode, Tavily, or Yahoo Finance.
-Normal index reuse/rebuild rules still apply.
+Normal incremental-index compatibility rules still apply. Reports also record
+`indexing_code_sha256` alongside the retriever-code hash to trace ingestion changes.
 
 ## What a case means
 
@@ -313,3 +314,35 @@ The previous reports are preserved. Compare them with:
 - `evaluations/results/retrieval_after_page_edge_context.json`
 - `evaluations/results/answers_after_page_edge_context.json`
 - `evaluations/results/answers_after_page_edge_context.md`
+
+## Incremental-ingestion verification
+
+The version-2 manifest introduces document IDs, chunk IDs, and exact-text hashes.
+The existing version-1 index therefore receives one migration rebuild. Keep its
+older evaluation reports: the index signature changes even though source text,
+ranking settings, and evaluation labels have not changed.
+
+The real corpus migration produced 1,575 records from five source files and
+embedded 1,536 unique chunk texts; 39 duplicate occurrences reused vectors.
+An immediate second ingestion reported zero added/updated/deleted chunks,
+1,575 unchanged chunks, and zero texts embedded.
+
+`evaluations/results/retrieval_after_incremental_ingestion.json` preserves the
+previous dataset, all returned passage text/source/page combinations, and all
+metrics: 14/15 cases, all twelve answerable cases, source and evidence hit rates
+of 1.0, and source-based MRR of approximately 0.958. The existing strict
+future-price empty-result failure is unchanged. No new paid answer-model
+evaluation was run for this ingestion change.
+
+Reproduce the incremental checks with:
+
+```bash
+python -m pytest -q tests/test_indexing.py tests/test_ingest.py
+HF_HUB_OFFLINE=1 market-research-index
+HF_HUB_OFFLINE=1 market-research-index
+HF_HUB_OFFLINE=1 python -m market_research.evaluate \
+  --output evaluations/results/retrieval_after_incremental_ingestion.json
+```
+
+The first index command may migrate an older index; the second should reuse it.
+Offline mode requires the local embedding model to be cached already.

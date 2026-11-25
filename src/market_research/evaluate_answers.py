@@ -259,6 +259,7 @@ def main() -> int:
             "retrieval_cases_version": retrieval_dataset.version,
             "retrieval_cases_sha256": hashlib.sha256(raw_retrieval_cases).hexdigest(),
             "retriever_code_sha256": hashlib.sha256(Path(__file__).with_name("rag.py").read_bytes()).hexdigest(),
+            "indexing_code_sha256": hashlib.sha256(Path(__file__).with_name("indexing.py").read_bytes()).hexdigest(),
             "answer_code_sha256": hashlib.sha256(Path(__file__).with_name("answer.py").read_bytes()).hexdigest(),
         }
         args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--knowledge-dir",
         type=Path,
-        help="Directory containing Markdown knowledge documents.",
+        help="Directory containing Markdown/PDF knowledge documents.",
     )
     parser.add_argument(
         "--index-dir",
@@ -55,7 +55,7 @@ def main() -> None:
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         parser.error(str(exc))
 
-    action = "Rebuilt" if report.rebuilt else "Reused"
+    action = "Rebuilt" if report.rebuilt else "Updated" if report.changes.changed else "Reused"
     print(f"{action} knowledge index.")
     print(f"- Knowledge directory: {report.knowledge_directory}")
     print(f"- Index directory: {report.persist_directory}")
@@ -63,6 +63,17 @@ def main() -> None:
     print(f"- Documents: {report.document_count}")
     print(f"- Chunks: {report.chunk_count}")
     print(f"- Manifest: {report.manifest_path}")
+    print(f"- Source files: {report.changes.source_count}")
+    print(f"- Chunks added: {report.changes.added_chunks}")
+    print(f"- Metadata updates: {report.changes.metadata_updates}")
+    print(f"- Chunks deleted: {report.changes.deleted_chunks}")
+    print(f"- Chunks unchanged: {report.changes.unchanged_chunks}")
+    print(f"- Unique texts embedded: {report.changes.embedded_texts}")
+    print(f"- Embedding assignments reused: {report.changes.reused_embeddings}")
+    print(f"- Duplicate text occurrences: {report.changes.duplicate_chunks}")
+    print(f"- Duplicate extracted sources: {report.changes.duplicate_sources}")
+    if report.changes.rebuild_reason:
+        print(f"- Rebuild reason: {report.changes.rebuild_reason}")
 
 
 if __name__ == "__main__":

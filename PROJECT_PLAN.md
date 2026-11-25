@@ -13,7 +13,9 @@
 - Grounded answer format with explicit source links and limitations.
 - Prompt-injection protections for retrieved news content.
 - Two-step RAG retrieval over a local Markdown knowledge base.
-- Persistent Chroma-backed RAG index with manifest-based rebuild detection.
+- Persistent Chroma-backed RAG index with incremental chunk synchronization.
+- Source/chunk identities, exact-text embedding reuse, metadata-only updates,
+  stale-record removal, and per-run ingestion counters.
 - Standalone `market-research-index` command for explicit knowledge ingestion.
 - Deterministic RAG retrieval evaluation cases for company, methodology, and ticker filtering.
 - Real-embedding retrieval evaluation command with fifteen labelled cases, saved evidence, and baseline metrics.
